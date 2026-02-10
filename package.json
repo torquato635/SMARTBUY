@@ -1,7 +1,8 @@
+
 {
-  "name": "alltech-smartbuy---gestão-de-compras",
+  "name": "alltech-smartbuy",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,19 +10,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "lucide-react": "0.460.0",
-    "framer-motion": "11.11.11",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "lucide-react": "^0.460.0",
+    "framer-motion": "^11.11.11",
     "recharts": "2.13.0",
-    "@google/genai": "1.40.0",
-    "clsx": "2.1.1",
-    "tailwind-merge": "2.5.4"
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
   }
 }
