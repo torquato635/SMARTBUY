@@ -1,14 +1,17 @@
-
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { Sheet, ProcurementItem, ItemStatus } from './types';
 
-const WORKER_URL = 'https://smartbuy-api.lucas-cpd02.workers.dev';
-const STORAGE_KEY = 'alltech_smartbuy_storage_v1';
+// CONFIGURAÇÃO GOOGLE
+// IMPORTANTE: Substitua pelo seu ID real no Google Cloud Console
+const CLIENT_ID = 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const DATA_FILENAME = 'smartbuy_alltech_data.json';
 
 interface ProcurementContextType {
   sheets: Sheet[];
   activeProjectId: string | null;
-  syncStatus: 'synced' | 'saving' | 'error' | 'offline';
+  syncStatus: 'synced' | 'saving' | 'error' | 'unauthorized';
+  isGoogleAuthenticated: boolean;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
@@ -19,124 +22,197 @@ interface ProcurementContextType {
   clearAllData: () => void;
   exportAllData: () => void;
   importAllData: (jsonData: string) => boolean;
-  forceSync: () => void;
+  loginGoogle: () => void;
+  logoutGoogle: () => void;
 }
 
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
 
 export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sheets, setSheets] = useState<Sheet[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    try {
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
+  const [sheets, setSheets] = useState<Sheet[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'offline'>('synced');
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'unauthorized'>('unauthorized');
+  const [isGoogleAuthenticated, setIsGoogleAuthenticated] = useState(false);
   
-  // Controle de concorrência para evitar loops de rede
-  const isNetworkActive = useRef(false);
-  const lastCloudHash = useRef(JSON.stringify(sheets));
+  const tokenClient = useRef<any>(null);
+  const driveFileId = useRef<string | null>(null);
+  const lastCloudHash = useRef("");
+  const isSyncing = useRef(false);
 
-  const saveToCloud = useCallback(async (data: Sheet[]) => {
-    if (isNetworkActive.current) return;
+  // --- LÓGICA GOOGLE DRIVE ---
+
+  const initGoogleDrive = useCallback(() => {
+    const gapi = (window as any).gapi;
+    const google = (window as any).google;
+
+    if (!gapi || !google) return;
+
+    gapi.load('client', async () => {
+      try {
+        await gapi.client.init({
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+        });
+        
+        // Se já tiver um token válido no gapi, tenta autenticar
+        const token = gapi.client.getToken();
+        if (token) {
+          setIsGoogleAuthenticated(true);
+          setSyncStatus('synced');
+          fetchFromDrive();
+        }
+      } catch (err) {
+        console.error("Erro gapi.init:", err);
+      }
+    });
+
+    tokenClient.current = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (response: any) => {
+        if (response.error !== undefined) {
+          setSyncStatus('error');
+          return;
+        }
+        setIsGoogleAuthenticated(true);
+        setSyncStatus('synced');
+        fetchFromDrive();
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    initGoogleDrive();
+  }, [initGoogleDrive]);
+
+  const findOrCreateFile = async () => {
+    const gapi = (window as any).gapi;
+    const response = await gapi.client.drive.files.list({
+      q: `name = '${DATA_FILENAME}' and trashed = false`,
+      fields: 'files(id, name)',
+    });
+
+    const files = response.result.files;
+    if (files && files.length > 0) {
+      driveFileId.current = files[0].id;
+      return files[0].id;
+    } else {
+      const createResponse = await gapi.client.drive.files.create({
+        resource: {
+          name: DATA_FILENAME,
+          mimeType: 'application/json',
+        },
+        fields: 'id',
+      });
+      driveFileId.current = createResponse.result.id;
+      return createResponse.result.id;
+    }
+  };
+
+  const saveToDrive = useCallback(async (data: Sheet[]) => {
+    if (!isGoogleAuthenticated || isSyncing.current) return;
     
     const dataStr = JSON.stringify(data);
-    // Se os dados não mudaram desde a última sincronização bem sucedida, ignora
-    if (dataStr === lastCloudHash.current) {
-        setSyncStatus('synced');
-        return;
-    }
+    if (dataStr === lastCloudHash.current) return;
 
     setSyncStatus('saving');
-    isNetworkActive.current = true;
-    
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-      const response = await fetch(WORKER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: dataStr,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        lastCloudHash.current = dataStr;
-        setSyncStatus('synced');
-        console.debug("SmartBuy: Sincronização de saída OK");
-      } else {
-        console.error(`SmartBuy: Erro Worker (${response.status})`);
-        setSyncStatus('error');
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        console.error("SmartBuy: Timeout na sincronização");
-      }
-      setSyncStatus('offline');
-    } finally {
-      isNetworkActive.current = false;
-    }
-  }, []);
-
-  const fetchFromCloud = useCallback(async () => {
-    // Não busca se já estivermos enviando algo
-    if (isNetworkActive.current) return;
+    isSyncing.current = true;
 
     try {
-      const response = await fetch(`${WORKER_URL}?t=${Date.now()}`, {
-        cache: 'no-store'
-      });
+      const gapi = (window as any).gapi;
+      const fileId = driveFileId.current || await findOrCreateFile();
 
-      if (response.ok) {
-        const cloudData = await response.json();
-        const cloudStr = JSON.stringify(cloudData);
+      const metadata = { name: DATA_FILENAME, mimeType: 'application/json' };
+      const boundary = 'smartbuy_upload_boundary';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const close_delim = "\r\n--" + boundary + "--";
 
-        // Só atualiza o estado local se o conteúdo da nuvem for realmente novo
-        // e se não estivermos com uma mudança local pendente
-        if (cloudStr !== lastCloudHash.current && cloudStr !== "[]") {
-          setSheets(cloudData);
-          localStorage.setItem(STORAGE_KEY, cloudStr);
-          lastCloudHash.current = cloudStr;
-          console.debug("SmartBuy: Sincronização de entrada OK");
+      const body =
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        dataStr +
+        close_delim;
+
+      // Usando gapi.client.request para evitar erros de Fetch/CORS e usar o token atualizado
+      await gapi.client.request({
+        path: `/upload/drive/v3/files/${fileId}?uploadType=multipart`,
+        method: 'PATCH',
+        body: body,
+        headers: {
+          'Content-Type': `multipart/related; boundary=${boundary}`,
         }
-        setSyncStatus('synced');
-      }
+      });
+
+      lastCloudHash.current = dataStr;
+      setSyncStatus('synced');
     } catch (err) {
-      console.warn("SmartBuy: Falha ao verificar nuvem (offline?)");
+      console.error("Erro ao salvar no Drive:", err);
+      setSyncStatus('error');
+      // Tenta renovar o token silenciosamente em caso de erro 401
+      if ((err as any).status === 401) loginGoogle();
+    } finally {
+      isSyncing.current = false;
     }
-  }, []);
+  }, [isGoogleAuthenticated]);
 
-  // Loop de verificação (Polling) - Intervalo aumentado para 10s para evitar 429 (Too Many Requests)
+  const fetchFromDrive = useCallback(async () => {
+    if (!isGoogleAuthenticated || isSyncing.current) return;
+
+    try {
+      const gapi = (window as any).gapi;
+      const fileId = driveFileId.current || await findOrCreateFile();
+
+      const response = await gapi.client.drive.files.get({
+        fileId: fileId,
+        alt: 'media',
+      });
+
+      // O gapi.client já tenta fazer o parse do JSON automaticamente se o MIME for correto
+      const cloudData = response.result;
+      
+      if (cloudData && Array.isArray(cloudData)) {
+        const cloudStr = JSON.stringify(cloudData);
+        if (cloudStr !== lastCloudHash.current) {
+          setSheets(cloudData);
+          lastCloudHash.current = cloudStr;
+        }
+      }
+      setSyncStatus('synced');
+    } catch (err) {
+      console.warn("Drive vazio ou erro na leitura:", err);
+    }
+  }, [isGoogleAuthenticated]);
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchFromCloud();
-    }, 10000);
+    if (!isGoogleAuthenticated) return;
+    const interval = setInterval(fetchFromDrive, 10000);
     return () => clearInterval(interval);
-  }, [fetchFromCloud]);
+  }, [isGoogleAuthenticated, fetchFromDrive]);
 
-  // Debounce para salvar alterações (Espera o usuário parar de digitar por 3 segundos)
   useEffect(() => {
     const handler = setTimeout(() => {
-      const currentDataStr = JSON.stringify(sheets);
-      if (currentDataStr !== lastCloudHash.current) {
-        localStorage.setItem(STORAGE_KEY, currentDataStr);
-        saveToCloud(sheets);
-      }
-    }, 3000);
+      saveToDrive(sheets);
+    }, 2000);
     return () => clearTimeout(handler);
-  }, [sheets, saveToCloud]);
+  }, [sheets, saveToDrive]);
 
-  const forceSync = () => {
-    saveToCloud(sheets);
-    fetchFromCloud();
+  const loginGoogle = () => {
+    if (tokenClient.current) {
+      tokenClient.current.requestAccessToken({ prompt: 'consent' });
+    }
   };
+
+  const logoutGoogle = () => {
+    const gapi = (window as any).gapi;
+    if (gapi.client) gapi.client.setToken(null);
+    setIsGoogleAuthenticated(false);
+    setSyncStatus('unauthorized');
+    setSheets([]);
+  };
+
+  // --- MÉTODOS DE DADOS ---
 
   const addSheet = useCallback((sheet: Sheet) => {
     setSheets(prev => [...prev, sheet]);
@@ -147,10 +223,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (activeProjectId === id) setActiveProjectId(null);
   }, [activeProjectId]);
 
-  const getAllItems = useCallback(() => sheets.flatMap(s => s.items), [sheets]);
+  const getAllItems = useCallback(() => {
+    return Array.isArray(sheets) ? sheets.flatMap(s => s.items) : [];
+  }, [sheets]);
 
   const getActiveProjectItems = useCallback(() => {
-    if (!activeProjectId) return [];
+    if (!activeProjectId || !Array.isArray(sheets)) return [];
     return sheets.find(s => s.id === activeProjectId)?.items || [];
   }, [sheets, activeProjectId]);
 
@@ -184,12 +262,11 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const clearAllData = useCallback(() => {
-    if (window.confirm("Isso apagará todos os projetos da nuvem e local. Continuar?")) {
+    if (window.confirm("Isso apagará seus dados no Google Drive. Continuar?")) {
       setSheets([]);
-      localStorage.removeItem(STORAGE_KEY);
-      saveToCloud([]);
+      saveToDrive([]);
     }
-  }, [saveToCloud]);
+  }, [saveToDrive]);
 
   const exportAllData = useCallback(() => {
     const dataStr = JSON.stringify(sheets);
@@ -197,7 +274,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `SMARTBUY_BACKUP_${new Date().toISOString().split('T')[0]}.smartbuy`;
+    link.download = `SMARTBUY_DRIVE_BACKUP_${new Date().toISOString().split('T')[0]}.json`;
     link.click();
   }, [sheets]);
 
@@ -216,9 +293,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   return (
     <ProcurementContext.Provider value={{ 
-      sheets, activeProjectId, syncStatus, addSheet, removeSheet, 
-      setActiveProjectId, getAllItems, getActiveProjectItems,
-      updateItemStatus, updateItemOrderInfo, clearAllData, exportAllData, importAllData, forceSync
+      sheets, activeProjectId, syncStatus, isGoogleAuthenticated,
+      addSheet, removeSheet, setActiveProjectId, getAllItems, getActiveProjectItems,
+      updateItemStatus, updateItemOrderInfo, clearAllData, exportAllData, importAllData,
+      loginGoogle, logoutGoogle
     }}>
       {children}
     </ProcurementContext.Provider>
@@ -227,6 +305,6 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
 export const useProcurement = () => {
   const context = useContext(ProcurementContext);
-  if (!context) throw new Error('useProcurement missing provider');
+  if (!context) throw new Error('useProcurement deve ser usado com um provider');
   return context;
 };
