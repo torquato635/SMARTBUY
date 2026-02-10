@@ -37,55 +37,57 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'offline'>('synced');
   
-  const isSyncing = useRef(false);
-  const hasPendingUpload = useRef(false);
-  const lastSyncHash = useRef(JSON.stringify(sheets));
-  const retryCount = useRef(0);
+  // Controle de concorrência para evitar loops de rede
+  const isNetworkActive = useRef(false);
+  const lastCloudHash = useRef(JSON.stringify(sheets));
 
-  // SALVAR NA NUVEM
   const saveToCloud = useCallback(async (data: Sheet[]) => {
-    if (isSyncing.current) {
-      hasPendingUpload.current = true;
-      return;
-    }
+    if (isNetworkActive.current) return;
     
     const dataStr = JSON.stringify(data);
-    if (dataStr === lastSyncHash.current && syncStatus === 'synced') return;
+    // Se os dados não mudaram desde a última sincronização bem sucedida, ignora
+    if (dataStr === lastCloudHash.current) {
+        setSyncStatus('synced');
+        return;
+    }
 
     setSyncStatus('saving');
-    isSyncing.current = true;
+    isNetworkActive.current = true;
     
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
       const response = await fetch(WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: dataStr,
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (response.ok) {
+        lastCloudHash.current = dataStr;
         setSyncStatus('synced');
-        lastSyncHash.current = dataStr;
-        retryCount.current = 0;
+        console.debug("SmartBuy: Sincronização de saída OK");
       } else {
-        console.error(`Erro Servidor: ${response.status}`);
+        console.error(`SmartBuy: Erro Worker (${response.status})`);
         setSyncStatus('error');
       }
-    } catch (err) {
-      console.error("Falha de conexão ao salvar:", err);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.error("SmartBuy: Timeout na sincronização");
+      }
       setSyncStatus('offline');
     } finally {
-      isSyncing.current = false;
-      if (hasPendingUpload.current) {
-        hasPendingUpload.current = false;
-        saveToCloud(sheets);
-      }
+      isNetworkActive.current = false;
     }
-  }, [sheets, syncStatus]);
+  }, []);
 
-  // BUSCAR DA NUVEM
   const fetchFromCloud = useCallback(async () => {
-    // Se estiver salvando agora, não busca para não causar conflito
-    if (isSyncing.current || syncStatus === 'saving') return;
+    // Não busca se já estivermos enviando algo
+    if (isNetworkActive.current) return;
 
     try {
       const response = await fetch(`${WORKER_URL}?t=${Date.now()}`, {
@@ -96,38 +98,38 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const cloudData = await response.json();
         const cloudStr = JSON.stringify(cloudData);
 
-        // Se o que está na nuvem é diferente do que temos localmente
-        if (cloudStr !== lastSyncHash.current && cloudStr !== "[]") {
-          // Só atualiza se o local não tiver mudado nos últimos segundos
+        // Só atualiza o estado local se o conteúdo da nuvem for realmente novo
+        // e se não estivermos com uma mudança local pendente
+        if (cloudStr !== lastCloudHash.current && cloudStr !== "[]") {
           setSheets(cloudData);
           localStorage.setItem(STORAGE_KEY, cloudStr);
-          lastSyncHash.current = cloudStr;
+          lastCloudHash.current = cloudStr;
+          console.debug("SmartBuy: Sincronização de entrada OK");
         }
         setSyncStatus('synced');
       }
     } catch (err) {
-      // Falha silenciosa no polling para não assustar o usuário
-      if (syncStatus === 'synced') setSyncStatus('offline');
+      console.warn("SmartBuy: Falha ao verificar nuvem (offline?)");
     }
-  }, [syncStatus]);
+  }, []);
 
-  // Polling inteligente
+  // Loop de verificação (Polling) - Intervalo aumentado para 10s para evitar 429 (Too Many Requests)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (syncStatus !== 'saving') fetchFromCloud();
-    }, 5000);
+      fetchFromCloud();
+    }, 10000);
     return () => clearInterval(interval);
-  }, [fetchFromCloud, syncStatus]);
+  }, [fetchFromCloud]);
 
-  // Auto-save debounced
+  // Debounce para salvar alterações (Espera o usuário parar de digitar por 3 segundos)
   useEffect(() => {
     const handler = setTimeout(() => {
-      const currentHash = JSON.stringify(sheets);
-      if (currentHash !== lastSyncHash.current) {
-        localStorage.setItem(STORAGE_KEY, currentHash);
+      const currentDataStr = JSON.stringify(sheets);
+      if (currentDataStr !== lastCloudHash.current) {
+        localStorage.setItem(STORAGE_KEY, currentDataStr);
         saveToCloud(sheets);
       }
-    }, 2000);
+    }, 3000);
     return () => clearTimeout(handler);
   }, [sheets, saveToCloud]);
 
@@ -145,14 +147,11 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (activeProjectId === id) setActiveProjectId(null);
   }, [activeProjectId]);
 
-  const getAllItems = useCallback(() => {
-    return sheets.flatMap(s => s.items);
-  }, [sheets]);
+  const getAllItems = useCallback(() => sheets.flatMap(s => s.items), [sheets]);
 
   const getActiveProjectItems = useCallback(() => {
     if (!activeProjectId) return [];
-    const sheet = sheets.find(s => s.id === activeProjectId);
-    return sheet ? sheet.items : [];
+    return sheets.find(s => s.id === activeProjectId)?.items || [];
   }, [sheets, activeProjectId]);
 
   const updateItemStatus = useCallback((itemId: string, newStatus: ItemStatus) => {
@@ -170,12 +169,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       items: sheet.items.map(item => {
         if (item.id === itemId) {
           let newStatus = item.status;
-          if (info.hasOwnProperty('invoiceNumber')) {
-            newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
-          } else if (info.hasOwnProperty('orderNumber')) {
-            if (!item.invoiceNumber) {
-              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
-            }
+          if (info.invoiceNumber !== undefined) {
+             newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+          } else if (info.orderNumber !== undefined) {
+             if (item.status !== 'ENTREGUE') {
+                newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+             }
           }
           return { ...item, ...info, status: newStatus };
         }
@@ -185,7 +184,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const clearAllData = useCallback(() => {
-    if (window.confirm("Apagar TUDO?")) {
+    if (window.confirm("Isso apagará todos os projetos da nuvem e local. Continuar?")) {
       setSheets([]);
       localStorage.removeItem(STORAGE_KEY);
       saveToCloud([]);
@@ -198,7 +197,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `BACKUP_${new Date().getTime()}.smartbuy`;
+    link.download = `SMARTBUY_BACKUP_${new Date().toISOString().split('T')[0]}.smartbuy`;
     link.click();
   }, [sheets]);
 
