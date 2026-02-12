@@ -1,17 +1,14 @@
+
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { Sheet, ProcurementItem, ItemStatus } from './types';
 
-// CONFIGURAÇÃO GOOGLE
-// IMPORTANTE: Substitua pelo seu ID real no Google Cloud Console
-const CLIENT_ID = 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com';
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-const DATA_FILENAME = 'smartbuy_alltech_data.json';
+const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
 
 interface ProcurementContextType {
   sheets: Sheet[];
   activeProjectId: string | null;
-  syncStatus: 'synced' | 'saving' | 'error' | 'unauthorized';
-  isGoogleAuthenticated: boolean;
+  syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline';
+  lastSyncTime: Date | null;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
@@ -22,197 +19,26 @@ interface ProcurementContextType {
   clearAllData: () => void;
   exportAllData: () => void;
   importAllData: (jsonData: string) => boolean;
-  loginGoogle: () => void;
-  logoutGoogle: () => void;
+  forceSync: () => void;
 }
 
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
 
 export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sheets, setSheets] = useState<Sheet[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'unauthorized'>('unauthorized');
-  const [isGoogleAuthenticated, setIsGoogleAuthenticated] = useState(false);
+  // Inicialização exclusiva pelo LocalStorage
+  const [sheets, setSheets] = useState<Sheet[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
   
-  const tokenClient = useRef<any>(null);
-  const driveFileId = useRef<string | null>(null);
-  const lastCloudHash = useRef("");
-  const isSyncing = useRef(false);
-
-  // --- LÓGICA GOOGLE DRIVE ---
-
-  const initGoogleDrive = useCallback(() => {
-    const gapi = (window as any).gapi;
-    const google = (window as any).google;
-
-    if (!gapi || !google) return;
-
-    gapi.load('client', async () => {
-      try {
-        await gapi.client.init({
-          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-        });
-        
-        // Se já tiver um token válido no gapi, tenta autenticar
-        const token = gapi.client.getToken();
-        if (token) {
-          setIsGoogleAuthenticated(true);
-          setSyncStatus('synced');
-          fetchFromDrive();
-        }
-      } catch (err) {
-        console.error("Erro gapi.init:", err);
-      }
-    });
-
-    tokenClient.current = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (response: any) => {
-        if (response.error !== undefined) {
-          setSyncStatus('error');
-          return;
-        }
-        setIsGoogleAuthenticated(true);
-        setSyncStatus('synced');
-        fetchFromDrive();
-      },
-    });
-  }, []);
-
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [syncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline'>('synced');
+  const [lastSyncTime] = useState<Date | null>(new Date());
+  
+  // Efeito para salvar no LocalStorage sempre que os dados mudarem
   useEffect(() => {
-    initGoogleDrive();
-  }, [initGoogleDrive]);
-
-  const findOrCreateFile = async () => {
-    const gapi = (window as any).gapi;
-    const response = await gapi.client.drive.files.list({
-      q: `name = '${DATA_FILENAME}' and trashed = false`,
-      fields: 'files(id, name)',
-    });
-
-    const files = response.result.files;
-    if (files && files.length > 0) {
-      driveFileId.current = files[0].id;
-      return files[0].id;
-    } else {
-      const createResponse = await gapi.client.drive.files.create({
-        resource: {
-          name: DATA_FILENAME,
-          mimeType: 'application/json',
-        },
-        fields: 'id',
-      });
-      driveFileId.current = createResponse.result.id;
-      return createResponse.result.id;
-    }
-  };
-
-  const saveToDrive = useCallback(async (data: Sheet[]) => {
-    if (!isGoogleAuthenticated || isSyncing.current) return;
-    
-    const dataStr = JSON.stringify(data);
-    if (dataStr === lastCloudHash.current) return;
-
-    setSyncStatus('saving');
-    isSyncing.current = true;
-
-    try {
-      const gapi = (window as any).gapi;
-      const fileId = driveFileId.current || await findOrCreateFile();
-
-      const metadata = { name: DATA_FILENAME, mimeType: 'application/json' };
-      const boundary = 'smartbuy_upload_boundary';
-      const delimiter = "\r\n--" + boundary + "\r\n";
-      const close_delim = "\r\n--" + boundary + "--";
-
-      const body =
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        JSON.stringify(metadata) +
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        dataStr +
-        close_delim;
-
-      // Usando gapi.client.request para evitar erros de Fetch/CORS e usar o token atualizado
-      await gapi.client.request({
-        path: `/upload/drive/v3/files/${fileId}?uploadType=multipart`,
-        method: 'PATCH',
-        body: body,
-        headers: {
-          'Content-Type': `multipart/related; boundary=${boundary}`,
-        }
-      });
-
-      lastCloudHash.current = dataStr;
-      setSyncStatus('synced');
-    } catch (err) {
-      console.error("Erro ao salvar no Drive:", err);
-      setSyncStatus('error');
-      // Tenta renovar o token silenciosamente em caso de erro 401
-      if ((err as any).status === 401) loginGoogle();
-    } finally {
-      isSyncing.current = false;
-    }
-  }, [isGoogleAuthenticated]);
-
-  const fetchFromDrive = useCallback(async () => {
-    if (!isGoogleAuthenticated || isSyncing.current) return;
-
-    try {
-      const gapi = (window as any).gapi;
-      const fileId = driveFileId.current || await findOrCreateFile();
-
-      const response = await gapi.client.drive.files.get({
-        fileId: fileId,
-        alt: 'media',
-      });
-
-      // O gapi.client já tenta fazer o parse do JSON automaticamente se o MIME for correto
-      const cloudData = response.result;
-      
-      if (cloudData && Array.isArray(cloudData)) {
-        const cloudStr = JSON.stringify(cloudData);
-        if (cloudStr !== lastCloudHash.current) {
-          setSheets(cloudData);
-          lastCloudHash.current = cloudStr;
-        }
-      }
-      setSyncStatus('synced');
-    } catch (err) {
-      console.warn("Drive vazio ou erro na leitura:", err);
-    }
-  }, [isGoogleAuthenticated]);
-
-  useEffect(() => {
-    if (!isGoogleAuthenticated) return;
-    const interval = setInterval(fetchFromDrive, 10000);
-    return () => clearInterval(interval);
-  }, [isGoogleAuthenticated, fetchFromDrive]);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      saveToDrive(sheets);
-    }, 2000);
-    return () => clearTimeout(handler);
-  }, [sheets, saveToDrive]);
-
-  const loginGoogle = () => {
-    if (tokenClient.current) {
-      tokenClient.current.requestAccessToken({ prompt: 'consent' });
-    }
-  };
-
-  const logoutGoogle = () => {
-    const gapi = (window as any).gapi;
-    if (gapi.client) gapi.client.setToken(null);
-    setIsGoogleAuthenticated(false);
-    setSyncStatus('unauthorized');
-    setSheets([]);
-  };
-
-  // --- MÉTODOS DE DADOS ---
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
+  }, [sheets]);
 
   const addSheet = useCallback((sheet: Sheet) => {
     setSheets(prev => [...prev, sheet]);
@@ -224,12 +50,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [activeProjectId]);
 
   const getAllItems = useCallback(() => {
-    return Array.isArray(sheets) ? sheets.flatMap(s => s.items) : [];
+    return sheets.flatMap(s => s.items);
   }, [sheets]);
 
   const getActiveProjectItems = useCallback(() => {
-    if (!activeProjectId || !Array.isArray(sheets)) return [];
-    return sheets.find(s => s.id === activeProjectId)?.items || [];
+    if (!activeProjectId) return [];
+    const sheet = sheets.find(s => s.id === activeProjectId);
+    return sheet ? sheet.items : [];
   }, [sheets, activeProjectId]);
 
   const updateItemStatus = useCallback((itemId: string, newStatus: ItemStatus) => {
@@ -247,12 +74,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       items: sheet.items.map(item => {
         if (item.id === itemId) {
           let newStatus = item.status;
-          if (info.invoiceNumber !== undefined) {
-             newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
-          } else if (info.orderNumber !== undefined) {
-             if (item.status !== 'ENTREGUE') {
-                newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
-             }
+          if (info.hasOwnProperty('invoiceNumber')) {
+            newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+          } else if (info.hasOwnProperty('orderNumber')) {
+            if (!item.invoiceNumber) {
+              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+            }
           }
           return { ...item, ...info, status: newStatus };
         }
@@ -262,20 +89,19 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const clearAllData = useCallback(() => {
-    if (window.confirm("Isso apagará seus dados no Google Drive. Continuar?")) {
+    if (window.confirm("Deseja apagar permanentemente todos os dados deste navegador?")) {
       setSheets([]);
-      saveToDrive([]);
+      localStorage.removeItem(STORAGE_KEY);
     }
-  }, [saveToDrive]);
+  }, []);
 
   const exportAllData = useCallback(() => {
-    const dataStr = JSON.stringify(sheets);
-    const blob = new Blob([dataStr], {type: "application/json"});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `SMARTBUY_DRIVE_BACKUP_${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
+    const dataStr = JSON.stringify(sheets, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', `BACKUP_LOCAL_${new Date().getTime()}.json`);
+    linkElement.click();
   }, [sheets]);
 
   const importAllData = useCallback((jsonData: string) => {
@@ -286,17 +112,33 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return true;
       }
       return false;
-    } catch {
+    } catch (e) {
       return false;
     }
   }, []);
 
+  const forceSync = useCallback(() => {
+    // Agora apenas valida se os dados estão no LocalStorage
+    console.log("Dados locais validados.");
+  }, []);
+
   return (
     <ProcurementContext.Provider value={{ 
-      sheets, activeProjectId, syncStatus, isGoogleAuthenticated,
-      addSheet, removeSheet, setActiveProjectId, getAllItems, getActiveProjectItems,
-      updateItemStatus, updateItemOrderInfo, clearAllData, exportAllData, importAllData,
-      loginGoogle, logoutGoogle
+      sheets, 
+      activeProjectId, 
+      syncStatus,
+      lastSyncTime,
+      addSheet, 
+      removeSheet, 
+      setActiveProjectId,
+      getAllItems, 
+      getActiveProjectItems,
+      updateItemStatus, 
+      updateItemOrderInfo,
+      clearAllData,
+      exportAllData,
+      importAllData,
+      forceSync
     }}>
       {children}
     </ProcurementContext.Provider>
@@ -305,6 +147,6 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
 export const useProcurement = () => {
   const context = useContext(ProcurementContext);
-  if (!context) throw new Error('useProcurement deve ser usado com um provider');
+  if (!context) throw new Error('useProcurement must be used within a ProcurementProvider');
   return context;
 };

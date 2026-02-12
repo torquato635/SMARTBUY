@@ -5,7 +5,6 @@ import {
   ShieldAlert, 
   Wind, 
   Package, 
-  Pipette,
   Layers,
   Flame,
   Factory
@@ -58,5 +57,5 @@ export const CATEGORY_CONFIG: Record<string, { color: string; icon: any; label: 
   'PNEUMATICA': { color: 'orange', icon: Wind, label: 'Pneumática', bg: 'bg-orange-50', text: 'text-orange-600', keywords: ['PNEUMATICA'] },
   'PEÇAS MONTAGEM': { color: 'violet', icon: Package, label: 'Peças Montagem', bg: 'bg-violet-50', text: 'text-violet-600', keywords: ['MONTAGEM'] },
   'SOLDA': { color: 'rose', icon: Flame, label: 'Solda', bg: 'bg-rose-50', text: 'text-rose-600', keywords: ['SOLDA'] },
-  'All': { color: 'slate', icon: Layers, label: 'Todos os Itens', bg: 'bg-slate-50', text: 'text-slate-600', keywords: [] }
+  'All': { color: 'slate', icon: Layers, label: 'Visão Geral', bg: 'bg-slate-50', text: 'text-slate-600', keywords: [] }
 };

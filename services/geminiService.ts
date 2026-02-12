@@ -26,7 +26,6 @@ export const analyzeProcurementData = async (items: ProcurementItem[]): Promise<
     - POLICARBONATO
     - PNEUMÁTICA
     - PEÇAS DE MONTAGEM
-    - TRATAMENTO
 
     Analise esta amostra de itens da lista de compras atual:
     ${JSON.stringify(itemsBySheet)}

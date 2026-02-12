@@ -6,14 +6,14 @@ interface FileUploadProps {
   onDataLoaded: (data: SheetData) => void;
 }
 
-// Função utilitária para normalizar texto: Maiúsculas e sem acentos
 const normalizeString = (str: string): string => {
   if (!str) return "";
   return str
     .toString()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
+    .toUpperCase()
+    .trim();
 };
 
 const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
@@ -30,7 +30,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Remover a extensão do arquivo (ex: .xlsx, .xls, .csv)
     const fileNameWithoutExtension = file.name.replace(/\.[^/.]+$/, "");
 
     const reader = new FileReader();
@@ -49,35 +48,46 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
         
         if (data.length === 0) return;
 
-        const items: ProcurementItem[] = data.map((row: any, index: number) => {
-          const description = findValue(row, ['Descricao', 'Descrição', 'Item', 'Description', 'Nome']) || 'SEM DESCRICAO';
-          const assembly = findValue(row, ['Conjunto', 'Conj', 'Assembly', 'Modulo', 'Módulo']) || '-';
-          const partNumber = findValue(row, ['Codigo', 'Código', 'PartNumber', 'Part Number', 'PN', 'Ref']) || '-';
-          const quantity = Number(findValue(row, ['Quantidade', 'Qtd', 'Quantity', 'Quant', 'Vol']) || 0);
-          
-          const sName = sheetName.toUpperCase();
-          const isFabricado = ['USINAGEM', 'LASER', 'FUNILARIA', 'TRATAMENTO', 'SOLDA', 'POLICARBONATO'].some(k => sName.includes(k));
-          
-          let type = isFabricado ? ItemType.FABRICADO : ItemType.COMERCIAL;
-          
-          const typeInRow = (findValue(row, ['Tipo', 'Type']) || '').toString().toLowerCase();
-          if (typeInRow.includes('fab')) type = ItemType.FABRICADO;
-          if (typeInRow.includes('com')) type = ItemType.COMERCIAL;
+        const items: ProcurementItem[] = data
+          .map((row: any, index: number) => {
+            const rawDesc = findValue(row, ['Descricao', 'Descrição', 'Item', 'Description', 'Nome']) || '';
+            const rawPN = findValue(row, ['Codigo', 'Código', 'PartNumber', 'Part Number', 'PN', 'Ref']) || '';
+            
+            const description = normalizeString(rawDesc.toString());
+            const partNumber = normalizeString(rawPN.toString());
 
-          return {
-            id: `${sheetName}-${index}-${Date.now()}`,
-            sheetName: normalizeString(sheetName),
-            assembly: normalizeString(assembly.toString()),
-            partNumber: normalizeString(partNumber.toString()),
-            description: normalizeString(description.toString()),
-            quantity,
-            unit: normalizeString((findValue(row, ['Unidade', 'Un', 'Unit']) || 'UN').toString()),
-            type,
-            supplier: normalizeString((findValue(row, ['Fornecedor', 'Supplier']) || '').toString()),
-            status: 'PENDENTE',
-            dueDate: findValue(row, ['Data', 'Prazo', 'Deadline']) || ''
-          };
-        });
+            // Regra estrita: Sem descrição, a linha não existe na plataforma
+            if (!description || description === "" || description === "SEM DESCRICAO") {
+              return null;
+            }
+
+            const assembly = findValue(row, ['Conjunto', 'Conj', 'Assembly', 'Modulo', 'Módulo']) || '-';
+            const quantity = Number(findValue(row, ['Quantidade', 'Qtd', 'Quantity', 'Quant', 'Vol']) || 0);
+            
+            const sName = sheetName.toUpperCase();
+            const isFabricado = ['USINAGEM', 'LASER', 'FUNILARIA', 'TRATAMENTO', 'SOLDA', 'POLICARBONATO'].some(k => sName.includes(k));
+            
+            let type = isFabricado ? ItemType.FABRICADO : ItemType.COMERCIAL;
+            
+            const typeInRow = (findValue(row, ['Tipo', 'Type']) || '').toString().toLowerCase();
+            if (typeInRow.includes('fab')) type = ItemType.FABRICADO;
+            if (typeInRow.includes('com')) type = ItemType.COMERCIAL;
+
+            return {
+              id: `${sheetName}-${index}-${Date.now()}`,
+              sheetName: normalizeString(sheetName),
+              assembly: normalizeString(assembly.toString()),
+              partNumber: partNumber || "-",
+              description: description,
+              quantity,
+              unit: normalizeString((findValue(row, ['Unidade', 'Un', 'Unit']) || 'UN').toString()),
+              type,
+              supplier: normalizeString((findValue(row, ['Fornecedor', 'Supplier']) || '').toString()),
+              status: 'PENDENTE' as const,
+              dueDate: findValue(row, ['Data', 'Prazo', 'Deadline']) || ''
+            };
+          })
+          .filter((item): item is ProcurementItem => item !== null);
 
         if (items.length > 0) {
           sheetData.sheets.push({ name: normalizeString(sheetName), items });
@@ -98,6 +108,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
           </svg>
         </div>
         <p className="mb-2 text-sm text-slate-700 font-bold text-center uppercase">ARRASTE SUA PLANILHA INDUSTRIAL AQUI</p>
+        <p className="text-[10px] text-slate-400 font-medium uppercase mb-4">Apenas linhas com descrição serão importadas</p>
         <div className="flex flex-wrap justify-center gap-2 mt-2">
           {['CONJUNTO', 'CODIGO', 'DESCRICAO', 'QUANTIDADE'].map(col => (
             <span key={col} className="px-2 py-1 bg-slate-100 text-[9px] font-bold text-slate-500 rounded uppercase tracking-wider">{col}</span>
