@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Sheet, ProcurementItem, ItemStatus } from './types';
 
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
@@ -16,6 +16,7 @@ interface ProcurementContextType {
   getActiveProjectItems: () => ProcurementItem[];
   updateItemStatus: (itemId: string, newStatus: ItemStatus) => void;
   updateItemOrderInfo: (itemId: string, info: any) => void;
+  bulkUpdateItems: (itemIds: Set<string>, info: any) => void;
   clearAllData: () => void;
   exportAllData: () => void;
   importAllData: (jsonData: string) => boolean;
@@ -25,7 +26,6 @@ interface ProcurementContextType {
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
 
 export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Inicialização exclusiva pelo LocalStorage
   const [sheets, setSheets] = useState<Sheet[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved ? JSON.parse(saved) : [];
@@ -35,7 +35,6 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [syncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline'>('synced');
   const [lastSyncTime] = useState<Date | null>(new Date());
   
-  // Efeito para salvar no LocalStorage sempre que os dados mudarem
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
   }, [sheets]);
@@ -74,17 +73,34 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       items: sheet.items.map(item => {
         if (item.id === itemId) {
           let newStatus = item.status;
+          
+          // Se o fornecedor for preenchido e estava pendente, muda para EM ORCAMENTO
+          if (info.hasOwnProperty('supplier') && info.supplier?.trim() !== '' && item.status === 'PENDENTE') {
+            newStatus = 'EM ORCAMENTO';
+          }
+
           if (info.hasOwnProperty('invoiceNumber')) {
-            newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+            newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') 
+              ? 'ENTREGUE' 
+              : (item.orderNumber ? 'COMPRADO' : (item.supplier || info.supplier ? 'EM ORCAMENTO' : 'PENDENTE'));
           } else if (info.hasOwnProperty('orderNumber')) {
-            if (!item.invoiceNumber) {
-              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+            if (item.status !== 'ENTREGUE') {
+              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : (item.supplier || info.supplier ? 'EM ORCAMENTO' : 'PENDENTE');
             }
           }
           return { ...item, ...info, status: newStatus };
         }
         return item;
       })
+    })));
+  }, []);
+
+  const bulkUpdateItems = useCallback((itemIds: Set<string>, info: any) => {
+    setSheets(prev => prev.map(sheet => ({
+      ...sheet,
+      items: sheet.items.map(item => 
+        itemIds.has(item.id) ? { ...item, ...info } : item
+      )
     })));
   }, []);
 
@@ -118,7 +134,6 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const forceSync = useCallback(() => {
-    // Agora apenas valida se os dados estão no LocalStorage
     console.log("Dados locais validados.");
   }, []);
 
@@ -135,6 +150,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       getActiveProjectItems,
       updateItemStatus, 
       updateItemOrderInfo,
+      bulkUpdateItems,
       clearAllData,
       exportAllData,
       importAllData,

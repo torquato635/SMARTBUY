@@ -30,11 +30,17 @@ import {
   AlertCircle,
   CheckCircle2,
   Timer,
-  Target
+  Target,
+  BarChart3,
+  CalendarDays,
+  Printer,
+  ChevronLeft,
+  Calendar
 } from 'lucide-react';
 import { ProcurementProvider, useProcurement } from './ProcurementContext';
 import DashboardStats from './components/DashboardStats';
 import FileUpload from './components/FileUpload';
+import ManagerialReportView from './components/ManagerialReportView';
 import { CATEGORY_CONFIG, Sheet as SheetType, SheetData, ItemStatus, ProcurementItem } from './types';
 
 type SortConfig = {
@@ -88,6 +94,7 @@ const MainContent = () => {
     removeSheet, 
     updateItemStatus, 
     updateItemOrderInfo,
+    bulkUpdateItems,
     exportAllData,
     importAllData
   } = useProcurement();
@@ -96,13 +103,15 @@ const MainContent = () => {
   const [search, setSearch] = useState('');
   const [receivingSearchTerm, setReceivingSearchTerm] = useState('');
   const [logisticsGlobalSearch, setLogisticsGlobalSearch] = useState('');
-  const [view, setView] = useState<'projects' | 'dashboard' | 'upload' | 'items' | 'projectReceiving'>('projects');
+  const [view, setView] = useState<'projects' | 'dashboard' | 'upload' | 'items' | 'projectReceiving' | 'report'>('projects');
   const [homeSubView, setHomeSubView] = useState<'projects' | 'receiving'>('projects');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'none', direction: 'asc' });
   const [filterStatus, setFilterStatus] = useState<ItemStatus | 'ALL' | 'NAO_COMPRADO'>('ALL');
   const [arrivalFilter, setArrivalFilter] = useState<'all' | 'atrasado' | 'hoje' | 'proximo'>('all');
   
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [isBulkDateModalOpen, setIsBulkDateModalOpen] = useState(false);
+  const [bulkDate, setBulkDate] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeProjectName = sheets.find(s => s.id === activeProjectId)?.nome || 'PROJETO';
@@ -325,6 +334,14 @@ const MainContent = () => {
     }
   };
 
+  const handleBulkDateApply = () => {
+    if (!bulkDate || selectedItemIds.size === 0) return;
+    bulkUpdateItems(selectedItemIds, { expectedArrival: bulkDate });
+    setIsBulkDateModalOpen(false);
+    setSelectedItemIds(new Set());
+    setBulkDate('');
+  };
+
   const handleExportReport = useCallback(() => {
     if (filteredItems.length === 0) return;
     const exportData = filteredItems.map(i => ({
@@ -355,7 +372,7 @@ const MainContent = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-12 font-sans flex flex-col">
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 print:hidden">
         <div className="w-full px-6 md:px-10 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setView('projects'); setActiveProjectId(null); }}>
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg">
@@ -717,11 +734,18 @@ const MainContent = () => {
              </motion.div>
           ) : view === 'dashboard' ? (
             <motion.div key="dash" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center space-x-5">
                   <button onClick={() => setView('projects')} className="p-3.5 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-all shadow-sm"><ArrowLeft className="w-5 h-5" /></button>
                   <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tight">{activeProjectName}</h1>
                 </div>
+                <button 
+                  onClick={() => setView('report')} 
+                  className="flex items-center space-x-3 px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 uppercase text-xs tracking-wider"
+                >
+                  <BarChart3 className="w-5 h-5" />
+                  <span>RELATÓRIO GERENCIAL</span>
+                </button>
               </div>
               
               <div className="space-y-8 p-1">
@@ -775,6 +799,24 @@ const MainContent = () => {
                 </div>
               </div>
             </motion.div>
+          ) : view === 'report' ? (
+            <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="mb-8 flex items-center justify-between print:hidden">
+                <div className="flex items-center space-x-4">
+                  <button onClick={() => setView('dashboard')} className="p-3.5 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2 font-black text-[10px] uppercase">
+                    <ChevronLeft className="w-4 h-4" /> Voltar
+                  </button>
+                  <h1 className="text-2xl font-black uppercase text-slate-800">Relatório Gerencial do Projeto</h1>
+                </div>
+                <button 
+                  onClick={() => window.print()}
+                  className="px-6 py-3 bg-white border border-slate-200 rounded-2xl font-black text-[10px] uppercase hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Relatório
+                </button>
+              </div>
+              <ManagerialReportView items={projectItems} projectName={activeProjectName} />
+            </motion.div>
           ) : view === 'upload' ? (
             <motion.div key="upload" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-3xl mx-auto py-16"><FileUpload onDataLoaded={handleDataLoaded} /></motion.div>
           ) : view === 'items' ? (
@@ -794,6 +836,15 @@ const MainContent = () => {
                     <input type="text" placeholder="BUSCAR POR DESCRIÇÃO OU CÓDIGO..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent text-[11px] uppercase font-bold outline-none" />
                   </div>
                   <div className="flex items-center gap-3">
+                    {selectedItemIds.size > 0 && (
+                      <button 
+                        onClick={() => setIsBulkDateModalOpen(true)}
+                        className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-100 transition-all shadow-sm"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>Definir Data ({selectedItemIds.size})</span>
+                      </button>
+                    )}
                     <button 
                       onClick={handleExportQuotation} 
                       className={`flex items-center space-x-2 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-md ${selectedItemIds.size > 0 ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
@@ -808,6 +859,41 @@ const MainContent = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Modal de Preenchimento em Massa */}
+              <AnimatePresence>
+                {isBulkDateModalOpen && (
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm"
+                  >
+                    <motion.div 
+                      initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+                      className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
+                    >
+                      <h3 className="text-xl font-black text-slate-800 uppercase mb-4">Preenchimento em Massa</h3>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-6">Definir data de chegada para {selectedItemIds.size} itens selecionados:</p>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-500 uppercase mb-2">Previsão de Chegada</label>
+                          <input 
+                            type="date" 
+                            value={bulkDate} 
+                            onChange={(e) => setBulkDate(e.target.value)}
+                            className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3 pt-4">
+                          <button onClick={() => setIsBulkDateModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Cancelar</button>
+                          <button onClick={handleBulkDateApply} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all">Aplicar Data</button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <div className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-200 shadow-2xl">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse min-w-[1400px]">
@@ -896,7 +982,7 @@ const MainContent = () => {
           ) : null}
         </AnimatePresence>
       </main>
-      <footer className="w-full px-6 md:px-10 py-6 border-t border-slate-200 bg-white mt-auto">
+      <footer className="w-full px-6 md:px-10 py-6 border-t border-slate-200 bg-white mt-auto print:hidden">
         <div className="flex items-center justify-between">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Alltech SmartBuy &copy; 2024 - Gerenciamento Local</p>
           <div className="flex items-center space-x-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">Armazenamento Local Ativo</span></div>
