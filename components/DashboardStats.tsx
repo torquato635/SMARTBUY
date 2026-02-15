@@ -1,15 +1,13 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { useProcurement } from '../ProcurementContext';
-import { Clock, ShoppingCart, CheckCircle2, Package, ShieldCheck, AlertTriangle, TrendingUp } from 'lucide-react';
-import { ProcurementItem, CATEGORY_CONFIG } from '../types';
+import { Clock, ShoppingCart, CheckCircle2, Package, AlertTriangle, ArrowRight } from 'lucide-react';
+import { ProcurementItem, CATEGORY_CONFIG, ItemStatus } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 interface DashboardStatsProps {
   items?: ProcurementItem[];
-  onEntregueClick?: () => void;
-  onAtrasadosClick?: () => void;
-  onPendentesClick?: () => void;
+  onStatusFilter: (status: ItemStatus | 'ALL' | 'NAO_COMPRADO' | 'ATRASADO') => void;
 }
 
 const normalizeString = (str: string): string => {
@@ -22,37 +20,43 @@ const normalizeString = (str: string): string => {
     .trim();
 };
 
-const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onEntregueClick, onAtrasadosClick, onPendentesClick }) => {
+const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onStatusFilter }) => {
   const { getAllItems } = useProcurement();
   const contextItems = getAllItems();
   const items = propItems || contextItems;
 
   const today = new Date().toISOString().split('T')[0];
 
+  const getItemCategory = useCallback((item: ProcurementItem) => {
+    const uSheet = normalizeString(item.sheetName);
+    for (const [key, config] of Object.entries(CATEGORY_CONFIG)) {
+      if (key === 'All' || key === 'FABRICADOS') continue;
+      if (config.keywords.some(kw => uSheet.includes(normalizeString(kw)))) {
+        return key;
+      }
+    }
+    if (item.type === 'Fabricado') return 'FABRICADOS';
+    return null;
+  }, []);
+
   const metrics = useMemo(() => {
-    // Apenas All e FABRICADOS são excluídos do somatório total das metas de compras
-    const excludedKeys = ['All', 'FABRICADOS'];
-    const categoriesToSum = Object.keys(CATEGORY_CONFIG).filter(k => !excludedKeys.includes(k));
-    
     let total = 0;
     let pendentes = 0;
-    let orcamento = 0;
     let comprados = 0;
     let entregues = 0;
     let atrasados = 0;
 
-    categoriesToSum.forEach(key => {
-      const config = CATEGORY_CONFIG[key];
-      const catItems = items.filter(i => 
-        config.keywords.some(kw => normalizeString(i.sheetName).includes(normalizeString(kw)))
-      );
+    items.forEach(item => {
+      const category = getItemCategory(item);
       
-      total += catItems.length;
-      pendentes += catItems.filter(i => i.status === 'PENDENTE').length;
-      orcamento += catItems.filter(i => i.status === 'EM ORCAMENTO').length;
-      comprados += catItems.filter(i => i.status === 'COMPRADO').length;
-      entregues += catItems.filter(i => i.status === 'ENTREGUE').length;
-      atrasados += catItems.filter(i => i.status === 'COMPRADO' && i.expectedArrival && i.expectedArrival < today).length;
+      if (!category || category === 'FABRICADOS') return;
+
+      total += 1;
+      if (item.status === 'PENDENTE') pendentes += 1;
+      if (item.status === 'COMPRADO') comprados += 1;
+      if (item.status === 'ENTREGUE') entregues += 1;
+      
+      if (item.status === 'COMPRADO' && item.expectedArrival && item.expectedArrival < today) atrasados += 1;
     });
 
     const totalCalculated = total || 1;
@@ -62,30 +66,61 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onEnt
     return {
       total,
       pendentes,
-      orcamento,
       comprados,
       entregues,
       purchaseEvolution,
       atrasados
     };
-  }, [items, today]);
+  }, [items, today, getItemCategory]);
 
   const gaugeData = [
     { name: 'EVOLUCAO', value: metrics.purchaseEvolution },
     { name: 'RESTANTE', value: 100 - metrics.purchaseEvolution },
   ];
 
-  const GAUGE_COLORS = ['#4F46E5', '#F1F5F9'];
+  const GAUGE_COLORS = ['#10b981', 'rgba(255,255,255,0.05)'];
+
+  const FilterButton = ({ 
+    label, 
+    value, 
+    colorClass, 
+    icon: Icon, 
+    onClick 
+  }: { 
+    label: string, 
+    value: number, 
+    colorClass: string, 
+    icon: any, 
+    onClick: () => void 
+  }) => (
+    <button 
+      onClick={onClick}
+      className={`flex flex-col p-5 rounded-3xl border border-white/5 transition-all hover:bg-white/10 hover:scale-[1.02] active:scale-95 text-left group bg-slate-800/40`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className={`p-2.5 rounded-xl ${colorClass} bg-slate-900/50 shadow-sm border border-white/5`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <ArrowRight className="w-4 h-4 text-white/10 group-hover:text-white/40 transition-colors" />
+      </div>
+      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</span>
+      <span className={`text-2xl font-black text-white`}>{value}</span>
+    </button>
+  );
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div 
-          onClick={onEntregueClick}
-          className="lg:col-span-1 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:border-indigo-300 transition-all group"
+          onClick={() => onStatusFilter('ENTREGUE')}
+          className="lg:col-span-1 bg-gradient-to-br from-slate-900 to-indigo-950 p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500/30 transition-all group"
         >
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-center group-hover:text-indigo-600">EVOLUÇÃO DE COMPRAS</p>
-          <div className="h-32 w-full relative">
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-500/30" />
+          <p className="text-sm font-black text-indigo-200 uppercase tracking-[0.25em] mb-6 text-center group-hover:text-white transition-colors">
+            EVOLUÇÃO DE COMPRAS
+          </p>
+          
+          <div className="h-48 w-full relative mt-2">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -94,76 +129,82 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onEnt
                   cy="100%"
                   startAngle={180}
                   endAngle={0}
-                  innerRadius={65}
-                  outerRadius={85}
+                  innerRadius={85}
+                  outerRadius={110}
                   paddingAngle={0}
                   dataKey="value"
+                  stroke="none"
                 >
                   {gaugeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={GAUGE_COLORS[index]} stroke="none" />
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={GAUGE_COLORS[index]} 
+                      style={{ filter: index === 0 ? 'drop-shadow(0 0 12px rgba(16,185,129,0.5))' : 'none' }}
+                    />
                   ))}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex items-center justify-center pt-8">
-              <span className="text-4xl font-black text-indigo-600">
-                {metrics.purchaseEvolution}%
-              </span>
+            <div className="absolute inset-0 flex items-center justify-center pt-12">
+              <div className="text-center">
+                <span className="text-7xl font-black text-white tracking-tighter drop-shadow-2xl">
+                  {metrics.purchaseEvolution}<span className="text-3xl text-emerald-400 align-top ml-1">%</span>
+                </span>
+              </div>
             </div>
           </div>
-          <p className="text-[9px] text-slate-400 font-bold mt-4 text-center uppercase">CATEGORIAS CONSOLIDADAS</p>
+          
+          <div className="absolute -bottom-8 -right-8 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity pointer-events-none">
+            <ShoppingCart className="w-32 h-32 text-white rotate-12" />
+          </div>
         </div>
 
-        <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center space-x-5">
-            <div className="p-4 rounded-2xl bg-indigo-50 text-indigo-600">
-              <Package className="w-7 h-7" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">TOTAL DE ITENS</p>
-              <p className="text-3xl font-black text-slate-800">{metrics.total}</p>
-              <p className="text-[9px] text-indigo-500 font-bold uppercase mt-1">SOMA DAS CATEGORIAS</p>
-            </div>
-          </div>
-
+        <div className="lg:col-span-3 bg-slate-900 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center gap-10">
           <div 
-            onClick={onEntregueClick}
-            className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center space-x-5 cursor-pointer hover:border-emerald-300 hover:bg-emerald-50/10 transition-all group"
+            onClick={() => onStatusFilter('ALL')}
+            className="flex items-center space-x-8 shrink-0 cursor-pointer group"
           >
-            <div className="p-4 rounded-2xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
-              <CheckCircle2 className="w-7 h-7" />
+            <div className="p-7 rounded-[2.5rem] bg-indigo-600 text-white shadow-2xl shadow-indigo-900/40 group-hover:scale-110 transition-transform border border-indigo-400/20">
+              <Package className="w-12 h-12" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ENTREGUES</p>
-              <p className="text-3xl font-black text-slate-800">{metrics.entregues}</p>
-              <p className="text-[9px] text-emerald-500 font-bold uppercase mt-1">VER LISTA COMPLETA</p>
+              <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">TOTAL DE ITENS</p>
+              <p className="text-6xl font-black text-white tracking-tighter">{metrics.total}</p>
             </div>
           </div>
+          
+          <div className="h-24 w-px bg-slate-800 hidden md:block" />
 
-          <div 
-            onClick={onAtrasadosClick}
-            className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm flex items-center space-x-5 cursor-pointer hover:border-rose-300 hover:bg-rose-50/10 transition-all group"
-          >
-            <div className="p-4 rounded-2xl bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-all">
-              <AlertTriangle className="w-7 h-7" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">EM ATRASO</p>
-              <p className="text-3xl font-black text-slate-800">{metrics.atrasados}</p>
-              <p className="text-[9px] text-rose-500 font-bold uppercase mt-1">REQUER ATENÇÃO</p>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 flex-1 w-full">
+            <FilterButton 
+              label="Comprados" 
+              value={metrics.comprados} 
+              colorClass="text-indigo-400" 
+              icon={ShoppingCart}
+              onClick={() => onStatusFilter('COMPRADO')}
+            />
+            <FilterButton 
+              label="Entregues" 
+              value={metrics.entregues} 
+              colorClass="text-emerald-400" 
+              icon={CheckCircle2}
+              onClick={() => onStatusFilter('ENTREGUE')}
+            />
+            <FilterButton 
+              label="Pendente" 
+              value={metrics.pendentes} 
+              colorClass="text-amber-400" 
+              icon={Clock}
+              onClick={() => onStatusFilter('PENDENTE')}
+            />
+            <FilterButton 
+              label="Em Atraso" 
+              value={metrics.atrasados} 
+              colorClass="text-rose-400" 
+              icon={AlertTriangle}
+              onClick={() => onStatusFilter('ATRASADO')}
+            />
           </div>
-        </div>
-      </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">EM ORÇAMENTO</span>
-          <span className="text-sm font-black text-blue-600">{metrics.orcamento}</span>
-        </div>
-        <div className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">COMPRADOS</span>
-          <span className="text-sm font-black text-emerald-600">{metrics.comprados}</span>
         </div>
       </div>
     </div>

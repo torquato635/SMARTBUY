@@ -59,36 +59,48 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [sheets, activeProjectId]);
 
   const updateItemStatus = useCallback((itemId: string, newStatus: ItemStatus) => {
+    const today = new Date().toISOString().split('T')[0];
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
       items: sheet.items.map(item => 
-        item.id === itemId ? { ...item, status: newStatus } : item
+        item.id === itemId 
+          ? { 
+              ...item, 
+              status: newStatus,
+              actualArrivalDate: newStatus === 'ENTREGUE' ? (item.actualArrivalDate || today) : undefined 
+            } 
+          : item
       )
     })));
   }, []);
 
   const updateItemOrderInfo = useCallback((itemId: string, info: any) => {
+    const today = new Date().toISOString().split('T')[0];
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
       items: sheet.items.map(item => {
         if (item.id === itemId) {
           let newStatus = item.status;
+          let arrivalDate = item.actualArrivalDate;
           
-          // Se o fornecedor for preenchido e estava pendente, muda para EM ORCAMENTO
-          if (info.hasOwnProperty('supplier') && info.supplier?.trim() !== '' && item.status === 'PENDENTE') {
-            newStatus = 'EM ORCAMENTO';
-          }
-
           if (info.hasOwnProperty('invoiceNumber')) {
-            newStatus = (info.invoiceNumber && info.invoiceNumber.trim() !== '') 
+            const hasInvoice = info.invoiceNumber && info.invoiceNumber.trim() !== '';
+            newStatus = hasInvoice 
               ? 'ENTREGUE' 
-              : (item.orderNumber ? 'COMPRADO' : (item.supplier || info.supplier ? 'EM ORCAMENTO' : 'PENDENTE'));
+              : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+            
+            if (hasInvoice && !arrivalDate) {
+              arrivalDate = today;
+            } else if (!hasInvoice && !info.status && newStatus !== 'ENTREGUE') {
+              arrivalDate = undefined;
+            }
           } else if (info.hasOwnProperty('orderNumber')) {
             if (item.status !== 'ENTREGUE') {
-              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : (item.supplier || info.supplier ? 'EM ORCAMENTO' : 'PENDENTE');
+              newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
             }
           }
-          return { ...item, ...info, status: newStatus };
+          
+          return { ...item, ...info, status: newStatus, actualArrivalDate: arrivalDate };
         }
         return item;
       })

@@ -32,6 +32,45 @@
           background: rgba(0,0,0,0.1);
           border-radius: 10px;
         }
+
+        /* Estilos de Impressão Otimizados */
+        @media print {
+            body { 
+              background: white !important; 
+              padding: 0 !important;
+              margin: 0 !important;
+            }
+            .print\:hidden { 
+              display: none !important; 
+            }
+            #root { 
+              padding: 0 !important; 
+              margin: 0 !important;
+            }
+            main {
+              padding: 0 !important;
+              margin: 0 !important;
+            }
+            .bg-slate-50 {
+              background-color: white !important;
+            }
+            .shadow-xl, .shadow-2xl, .shadow-sm {
+              box-shadow: none !important;
+              border: 1px solid #e2e8f0 !important;
+            }
+            /* Forçar cores de fundo na impressão */
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            /* Evitar quebras de página no meio de gráficos */
+            .recharts-responsive-container {
+              page-break-inside: avoid !important;
+            }
+            .rounded-\[2\.5rem\], .rounded-\[3rem\] {
+              border-radius: 1rem !important;
+            }
+        }
     </style>
 <script type="importmap">
 {
