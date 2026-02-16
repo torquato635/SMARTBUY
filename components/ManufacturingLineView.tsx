@@ -100,10 +100,10 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
   }) => {
     if (!item) return (
       <div className="flex flex-col items-center opacity-10">
-        <div className="w-10 h-10 rounded-2xl border-2 border-dashed border-slate-300 mb-1 flex items-center justify-center">
-           <Icon className="w-4 h-4 text-slate-300" />
+        <div className="w-10 h-10 rounded-2xl border-2 border-dashed border-slate-400 mb-1 flex items-center justify-center">
+           <Icon className="w-4 h-4 text-slate-400" />
         </div>
-        <span className="text-[7px] font-black uppercase text-slate-300">Não Aplic.</span>
+        <span className="text-[7px] font-black uppercase text-slate-400">Não Aplic.</span>
       </div>
     );
 
@@ -111,12 +111,12 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
     const isAtrasado = !isConcluido && item.status === 'COMPRADO' && item.expectedArrival && item.expectedArrival < today;
     
     const colors = {
-      'PENDENTE': 'bg-amber-100 text-amber-600 border-amber-200',
-      'EM ORCAMENTO': 'bg-blue-100 text-blue-600 border-blue-200',
-      'COMPRADO': 'bg-indigo-100 text-indigo-600 border-indigo-200',
-      'ENTREGUE': 'bg-emerald-100 text-emerald-600 border-emerald-200 hover:bg-emerald-200 transition-colors',
-      'ATRASADO': 'bg-rose-100 text-rose-600 border-rose-200',
-      'BLOCKED': 'bg-slate-100 text-slate-400 border-slate-200 grayscale cursor-not-allowed opacity-60'
+      'PENDENTE': 'bg-amber-100 text-amber-800 border-amber-300',
+      'EM ORCAMENTO': 'bg-blue-100 text-blue-800 border-blue-300',
+      'COMPRADO': 'bg-indigo-100 text-indigo-800 border-indigo-300',
+      'ENTREGUE': 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200 transition-colors',
+      'ATRASADO': 'bg-rose-100 text-rose-800 border-rose-300',
+      'BLOCKED': 'bg-slate-200 text-slate-500 border-slate-300 grayscale cursor-not-allowed opacity-70'
     };
 
     const statusKey = isDisabled && !isConcluido ? 'BLOCKED' : (isConcluido ? 'ENTREGUE' : (isAtrasado ? 'ATRASADO' : item.status));
@@ -138,12 +138,12 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
             <Icon className="w-6 h-6" />
           )}
         </button>
-        <span className={`text-[8px] font-black uppercase mt-2 tracking-tighter ${isAtrasado ? 'text-rose-600' : (isDisabled && !isConcluido ? 'text-slate-400' : 'text-slate-500')}`}>
+        <span className={`text-[8px] font-black uppercase mt-2 tracking-tighter ${isAtrasado ? 'text-rose-800' : (isDisabled && !isConcluido ? 'text-slate-600' : 'text-slate-800')}`}>
           {label}
         </span>
         {isDisabled && !isConcluido && (
           <div className="absolute -top-1 -right-1">
-             <div className="bg-amber-500 w-3 h-3 rounded-full border-2 border-white shadow-sm" />
+             <div className="bg-amber-600 w-3 h-3 rounded-full border-2 border-white shadow-sm" />
           </div>
         )}
       </div>
@@ -152,61 +152,61 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="bg-slate-900 p-10 rounded-[3rem] text-white shadow-2xl flex flex-col md:flex-row items-center justify-between overflow-hidden relative">
+      <div className="bg-slate-950 p-10 rounded-[3rem] text-white shadow-2xl flex flex-col md:flex-row items-center justify-between overflow-hidden relative border border-slate-800">
         <div className="relative z-10">
           <div className="flex items-center gap-4 mb-3">
-             <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-500/20">
+             <div className="p-3 bg-emerald-600 rounded-2xl shadow-lg shadow-emerald-500/20">
                 <Factory className="w-8 h-8 text-white" />
              </div>
              <div>
                 <h2 className="text-3xl font-black uppercase tracking-tighter">Fluxo de Fabricação</h2>
-                <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-[0.2em]">Usinagem: Etapa Final Bloqueada</p>
+                <p className="text-emerald-400 text-[10px] font-bold uppercase tracking-[0.2em]">Usinagem: Etapa Final Bloqueada</p>
              </div>
           </div>
           <div className="flex items-center gap-2">
-             <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black uppercase rounded-full">Trava de Precedência Ativa</span>
-             <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase rounded-full">Garantia de Recebimento</span>
+             <span className="px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-black uppercase rounded-full">Trava de Precedência Ativa</span>
+             <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[9px] font-black uppercase rounded-full">Garantia de Recebimento</span>
           </div>
         </div>
         
         <div className="mt-6 md:mt-0 flex items-center gap-8 relative z-10">
            <div className="text-center">
-              <span className="text-4xl font-black block">{processedData.length}</span>
-              <span className="text-[10px] font-black text-slate-500 uppercase">Conjuntos</span>
+              <span className="text-4xl font-black block text-white">{processedData.length}</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase">Conjuntos</span>
            </div>
            <div className="w-px h-12 bg-slate-800" />
            <div className="text-center">
-              <span className="text-4xl font-black block text-emerald-500">
+              <span className="text-4xl font-black block text-emerald-400">
                 {Math.round((processedData.filter(r => r.usinagem.status === 'ENTREGUE').length / (processedData.length || 1)) * 100)}%
               </span>
-              <span className="text-[10px] font-black text-slate-500 uppercase">Finalizados</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase">Finalizados</span>
            </div>
         </div>
 
-        <div className="absolute -right-20 -bottom-20 opacity-5">
-           <Settings className="w-80 h-80 rotate-12" />
+        <div className="absolute -right-20 -bottom-20 opacity-[0.03]">
+           <Settings className="w-80 h-80 rotate-12 text-white" />
         </div>
       </div>
 
-      <div className="bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
+      <div className="bg-white rounded-[3rem] border border-slate-300 shadow-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200">
-                <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest">Componente</th>
-                <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Controle de Fluxo e Precedência</th>
-                <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Conjunto</th>
+              <tr className="bg-slate-100 border-b border-slate-300">
+                <th className="px-10 py-8 text-[11px] font-black text-slate-700 uppercase tracking-widest">Componente</th>
+                <th className="px-10 py-8 text-[11px] font-black text-slate-700 uppercase tracking-widest text-center">Controle de Fluxo e Precedência</th>
+                <th className="px-10 py-8 text-[11px] font-black text-slate-700 uppercase tracking-widest text-center">Conjunto</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-200">
               {processedData.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50/50 transition-all group">
+                <tr key={row.id} className="hover:bg-slate-50 transition-all group">
                   <td className="px-10 py-8">
                     <div className="flex flex-col">
-                      <span className="text-sm font-black text-slate-900 uppercase leading-none group-hover:text-indigo-600 transition-colors">{row.usinagem.description}</span>
+                      <span className="text-sm font-black text-slate-900 uppercase leading-none group-hover:text-emerald-700 transition-colors">{row.usinagem.description}</span>
                       <div className="flex items-center gap-3 mt-2">
-                        <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">{row.usinagem.partNumber}</span>
-                        <div className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 rounded-lg text-indigo-600">
+                        <span className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg border border-slate-300">{row.usinagem.partNumber}</span>
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-lg text-emerald-800 border border-emerald-100">
                            <Layers className="w-3 h-3" />
                            <span className="text-[10px] font-black uppercase">Qtd: {row.usinagem.quantity}</span>
                         </div>
@@ -221,7 +221,7 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
                         icon={Zap} 
                       />
                       <div className="px-4 mb-4">
-                        <ArrowRight className={`w-5 h-5 transition-colors ${row.laser?.status === 'ENTREGUE' ? 'text-emerald-500' : 'text-slate-200'}`} />
+                        <ArrowRight className={`w-5 h-5 transition-colors ${row.laser?.status === 'ENTREGUE' ? 'text-emerald-600' : 'text-slate-300'}`} />
                       </div>
                       <StatusBadge 
                         item={row.comerciais} 
@@ -229,7 +229,7 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
                         icon={Package} 
                       />
                       <div className="px-4 mb-4">
-                        <ArrowRight className={`w-5 h-5 transition-colors ${row.comerciais?.status === 'ENTREGUE' ? 'text-emerald-500' : 'text-slate-200'}`} />
+                        <ArrowRight className={`w-5 h-5 transition-colors ${row.comerciais?.status === 'ENTREGUE' ? 'text-emerald-600' : 'text-slate-300'}`} />
                       </div>
                       <StatusBadge 
                         item={row.usinagem} 
@@ -241,7 +241,7 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
                     </div>
                   </td>
                   <td className="px-10 py-8 text-center">
-                    <div className="inline-block px-5 py-2.5 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-slate-200">
+                    <div className="inline-block px-5 py-2.5 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-slate-300">
                       {row.usinagem.assembly}
                     </div>
                   </td>
@@ -251,11 +251,11 @@ const ManufacturingLineView: React.FC<ManufacturingLineViewProps> = ({ items, up
                 <tr>
                   <td colSpan={3} className="px-10 py-32 text-center">
                     <div className="flex flex-col items-center max-w-sm mx-auto">
-                      <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-6">
-                        <Factory className="w-10 h-10 text-slate-300" />
+                      <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-6 border border-slate-200">
+                        <Factory className="w-10 h-10 text-slate-400" />
                       </div>
-                      <h4 className="text-lg font-black text-slate-800 uppercase tracking-tighter mb-2">Aguardando Pareamento</h4>
-                      <p className="text-xs font-medium text-slate-400 uppercase leading-relaxed text-center">O sistema listará aqui itens que requerem multiprocessamento para garantir a integridade da baixa.</p>
+                      <h4 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-2">Aguardando Pareamento</h4>
+                      <p className="text-xs font-bold text-slate-600 uppercase leading-relaxed text-center">O sistema listará aqui itens que requerem multiprocessamento para garantir a integridade da baixa.</p>
                     </div>
                   </td>
                 </tr>

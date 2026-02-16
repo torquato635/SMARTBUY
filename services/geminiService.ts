@@ -1,52 +1,96 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { ProcurementItem } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-export const analyzeProcurementData = async (items: ProcurementItem[]): Promise<string> => {
-  const model = "gemini-3-flash-preview";
+export const getProjectStrategicInsights = async (items: ProcurementItem[], projectName: string): Promise<string> => {
+  const ai = getAI();
+  const model = "gemini-3-pro-preview";
   
-  const itemsBySheet: Record<string, any[]> = {};
-  items.forEach(item => {
-    if (!itemsBySheet[item.sheetName]) itemsBySheet[item.sheetName] = [];
-    if (itemsBySheet[item.sheetName].length < 10) {
-      itemsBySheet[item.sheetName].push({
-        desc: item.description,
-        qty: item.quantity,
-        type: item.type
-      });
-    }
-  });
+  const stats = {
+    total: items.length,
+    pendentes: items.filter(i => i.status === 'PENDENTE').length,
+    atrasados: items.filter(i => i.status === 'COMPRADO' && i.expectedArrival && i.expectedArrival < new Date().toISOString().split('T')[0]).length,
+    entregues: items.filter(i => i.status === 'ENTREGUE').length,
+    semFornecedor: items.filter(i => !i.supplier).length,
+    categorias: [...new Set(items.map(i => i.sheetName))],
+    amostraDescricoes: items.filter(i => i.status === 'PENDENTE').slice(0, 20).map(i => i.description)
+  };
 
   const prompt = `
-    Como um consultor sênior de suprimentos industriais especializado em:
-    - LASER E FUNILARIA
-    - USINAGEM
-    - POLICARBONATO
-    - PNEUMÁTICA
-    - PEÇAS DE MONTAGEM
-
-    Analise esta amostra de itens da lista de compras atual:
-    ${JSON.stringify(itemsBySheet)}
+    Como um Diretor de Suprimentos Industrial, analise estrategicamente o projeto "${projectName}":
     
-    Por favor, forneça em Português do Brasil:
-    1. **Visão Geral por Categoria**: Quais categorias parecem mais críticas ou volumosas.
-    2. **Estratégia de Negociação**: Sugestões específicas para cada categoria (ex: agrupar itens de usinagem).
-    3. **Riscos de Prazo**: Avaliação baseada na complexidade de fabricados vs comerciais.
-    4. **Dica de Especialista**: Uma recomendação tática para o comprador hoje.
+    ESTATÍSTICAS:
+    - Itens Totais: ${stats.total}
+    - Entregues (Sucesso): ${stats.entregues}
+    - Em Atraso Crítico: ${stats.atrasados}
+    - Pendentes de Compra: ${stats.pendentes}
+    - Itens sem fornecedor definido: ${stats.semFornecedor}
+    - Categorias: ${stats.categorias.join(', ')}
 
-    Use Markdown rico com tabelas se necessário.
+    DESCRIÇÕES DOS ITENS PENDENTES (Amostra):
+    ${stats.amostraDescricoes.join(' | ')}
+
+    FORNEÇA UMA ANÁLISE EM MARKDOWN:
+    1. **RISCO DE CRONOGRAMA**: Chance de atraso?
+    2. **ESTRATÉGIA DE CATEGORIA**: Onde focar hoje?
+    3. **INSIGHTS DE ITENS**: Sugira gargalos de lead-time.
+    4. **PLANO DE AÇÃO**: 3 passos imediatos.
   `;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
+      config: { thinkingConfig: { thinkingBudget: 4000 } }
     });
-    return response.text || "Não foi possível gerar a análise no momento.";
+    return response.text || "Sem análise no momento.";
   } catch (error) {
-    console.error("Erro na análise da IA:", error);
-    return "Erro ao processar análise inteligente.";
+    console.error(error);
+    return "Erro ao processar análise estratégica.";
+  }
+};
+
+export const getReceivingInsights = async (items: ProcurementItem[]): Promise<string> => {
+  const ai = getAI();
+  const model = "gemini-3-flash-preview"; // Flash para maior agilidade no painel de controle
+  const today = new Date().toISOString().split('T')[0];
+
+  const relevantItems = items.filter(i => i.status === 'COMPRADO');
+  const delayed = relevantItems.filter(i => i.expectedArrival && i.expectedArrival < today);
+  const next7Days = relevantItems.filter(i => i.expectedArrival && i.expectedArrival >= today && i.expectedArrival <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+  const supplierIssues = delayed.reduce((acc: any, curr) => {
+    const s = curr.supplier || 'DESCONHECIDO';
+    acc[s] = (acc[s] || 0) + 1;
+    return acc;
+  }, {});
+
+  const topTroubleSuppliers = Object.entries(supplierIssues)
+    .sort((a: any, b: any) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => `${name} (${count} atrasos)`)
+    .join(', ');
+
+  const prompt = `
+    Analise o estado atual do recebimento logístico:
+    - Itens aguardando chegada: ${relevantItems.length}
+    - Itens em atraso: ${delayed.length}
+    - Chegadas previstas para os próximos 7 dias: ${next7Days.length}
+    - Fornecedores com mais atrasos: ${topTroubleSuppliers}
+
+    Crie um resumo executivo muito curto (máximo 4 bullets) em MARKDOWN focando em:
+    - Situação crítica imediata.
+    - Previsão de fluxo para a semana.
+    - Alerta de fornecedor.
+    Use tom profissional de gestor de logística.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({ model, contents: prompt });
+    return response.text || "Sem análise logística disponível.";
+  } catch (error) {
+    return "Logística indisponível.";
   }
 };

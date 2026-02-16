@@ -95,15 +95,15 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
   }) => (
     <button 
       onClick={onClick}
-      className={`flex flex-col p-5 rounded-3xl border border-white/5 transition-all hover:bg-white/10 hover:scale-[1.02] active:scale-95 text-left group bg-slate-800/40`}
+      className={`flex flex-col p-5 rounded-3xl border border-white/10 transition-all hover:bg-emerald-900/60 hover:scale-[1.02] active:scale-95 text-left group bg-[#022c22]`}
     >
       <div className="flex items-center justify-between mb-2">
-        <div className={`p-2.5 rounded-xl ${colorClass} bg-slate-900/50 shadow-sm border border-white/5`}>
+        <div className={`p-2.5 rounded-xl ${colorClass} bg-black/30 shadow-sm border border-white/5`}>
           <Icon className="w-4 h-4" />
         </div>
-        <ArrowRight className="w-4 h-4 text-white/10 group-hover:text-white/40 transition-colors" />
+        <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white/60 transition-colors" />
       </div>
-      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</span>
+      <span className="text-[10px] font-black text-emerald-50 uppercase tracking-widest mb-1">{label}</span>
       <span className={`text-2xl font-black text-white`}>{value}</span>
     </button>
   );
@@ -113,10 +113,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div 
           onClick={() => onStatusFilter('ENTREGUE')}
-          className="lg:col-span-1 bg-gradient-to-br from-slate-900 to-indigo-950 p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500/30 transition-all group"
+          className="lg:col-span-1 bg-gradient-to-br from-[#020617] to-[#022c22] p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/30 transition-all group"
         >
-          <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-500/30" />
-          <p className="text-sm font-black text-indigo-200 uppercase tracking-[0.25em] mb-6 text-center group-hover:text-white transition-colors">
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-emerald-500/50" />
+          <p className="text-sm font-black text-emerald-50 uppercase tracking-[0.25em] mb-6 text-center group-hover:text-white transition-colors">
             EVOLUÇÃO DE COMPRAS
           </p>
           
@@ -145,30 +145,30 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex items-center justify-center pt-12">
-              <div className="text-center">
-                <span className="text-7xl font-black text-white tracking-tighter drop-shadow-2xl">
+            <div className="absolute inset-0 flex items-center justify-center pt-8">
+              <div className="text-center translate-y-4">
+                <span className="text-8xl font-black text-white tracking-tighter drop-shadow-2xl">
                   {metrics.purchaseEvolution}<span className="text-3xl text-emerald-400 align-top ml-1">%</span>
                 </span>
               </div>
             </div>
           </div>
           
-          <div className="absolute -bottom-8 -right-8 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity pointer-events-none">
+          <div className="absolute -bottom-8 -right-8 opacity-[0.05] group-hover:opacity-[0.1] transition-opacity pointer-events-none">
             <ShoppingCart className="w-32 h-32 text-white rotate-12" />
           </div>
         </div>
 
-        <div className="lg:col-span-3 bg-slate-900 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center gap-10">
+        <div className="lg:col-span-3 bg-slate-950 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center gap-10">
           <div 
             onClick={() => onStatusFilter('ALL')}
             className="flex items-center space-x-8 shrink-0 cursor-pointer group"
           >
-            <div className="p-7 rounded-[2.5rem] bg-indigo-600 text-white shadow-2xl shadow-indigo-900/40 group-hover:scale-110 transition-transform border border-indigo-400/20">
+            <div className="p-7 rounded-[2.5rem] bg-emerald-600 text-white shadow-2xl shadow-emerald-900/40 group-hover:scale-110 transition-transform border border-emerald-400/20">
               <Package className="w-12 h-12" />
             </div>
             <div>
-              <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">TOTAL DE ITENS</p>
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">TOTAL DE ITENS</p>
               <p className="text-6xl font-black text-white tracking-tighter">{metrics.total}</p>
             </div>
           </div>
@@ -179,7 +179,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
             <FilterButton 
               label="Comprados" 
               value={metrics.comprados} 
-              colorClass="text-indigo-400" 
+              colorClass="text-emerald-400" 
               icon={ShoppingCart}
               onClick={() => onStatusFilter('COMPRADO')}
             />

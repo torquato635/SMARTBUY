@@ -1,13 +1,15 @@
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { Sheet, ProcurementItem, ItemStatus } from './types';
+import { supabase } from './lib/supabase';
 
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
+const SUPABASE_TABLE = 'app_data';
 
 interface ProcurementContextType {
   sheets: Sheet[];
   activeProjectId: string | null;
-  syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline';
+  syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending';
   lastSyncTime: Date | null;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
@@ -26,27 +28,118 @@ interface ProcurementContextType {
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
 
 export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sheets, setSheets] = useState<Sheet[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
-  
+  const [sheets, setSheets] = useState<Sheet[]>([]);
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [syncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline'>('synced');
-  const [lastSyncTime] = useState<Date | null>(new Date());
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending'>('loading');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   
+  const isDirtyRef = useRef(false);
+
+  const saveToSupabase = useCallback(async (data: Sheet[]) => {
+    if (!isInitialLoadComplete || !isDirtyRef.current) return;
+
+    setSyncStatus('saving');
+    try {
+      const { error } = await supabase
+        .from(SUPABASE_TABLE)
+        .upsert({ id: 1, payload: data, updated_at: new Date() }, { onConflict: 'id' });
+
+      if (error) throw error;
+      
+      setSyncStatus('synced');
+      isDirtyRef.current = false;
+      setLastSyncTime(new Date());
+    } catch (err) {
+      console.error('Erro ao sincronizar com Supabase:', err);
+      setSyncStatus('error');
+    }
+  }, [isInitialLoadComplete]);
+
   useEffect(() => {
+    const loadInitialData = async () => {
+      setSyncStatus('loading');
+      try {
+        const { data, error } = await supabase
+          .from(SUPABASE_TABLE)
+          .select('payload')
+          .eq('id', 1)
+          .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
+
+        if (data && data.payload && Array.isArray(data.payload)) {
+          setSheets(data.payload);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data.payload));
+        } else {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) setSheets(JSON.parse(saved));
+        }
+        
+        setIsInitialLoadComplete(true);
+        setSyncStatus('synced');
+        setLastSyncTime(new Date());
+      } catch (err) {
+        console.error('Erro ao carregar do Supabase:', err);
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) setSheets(JSON.parse(saved));
+        setIsInitialLoadComplete(true);
+        setSyncStatus('offline');
+      }
+    };
+
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('realtime_procurement')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: SUPABASE_TABLE, filter: 'id=eq.1' },
+        (payload) => {
+          if (!isDirtyRef.current && payload.new && payload.new.payload) {
+            setSheets(payload.new.payload);
+            setLastSyncTime(new Date());
+            setSyncStatus('synced');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialLoadComplete) return;
+
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
-  }, [sheets]);
+    
+    // Intervalo de 1,5 segundos conforme solicitado
+    const timeoutId = setTimeout(() => {
+      saveToSupabase(sheets);
+    }, 1500); 
+    
+    return () => clearTimeout(timeoutId);
+  }, [sheets, saveToSupabase, isInitialLoadComplete]);
+
+  const markAsDirty = useCallback(() => {
+    isDirtyRef.current = true;
+    setSyncStatus('pending');
+  }, []);
 
   const addSheet = useCallback((sheet: Sheet) => {
     setSheets(prev => [...prev, sheet]);
-  }, []);
+    markAsDirty();
+  }, [markAsDirty]);
 
   const removeSheet = useCallback((id: string) => {
     setSheets(prev => prev.filter(s => s.id !== id));
     if (activeProjectId === id) setActiveProjectId(null);
-  }, [activeProjectId]);
+    markAsDirty();
+  }, [activeProjectId, markAsDirty]);
 
   const getAllItems = useCallback(() => {
     return sheets.flatMap(s => s.items);
@@ -72,7 +165,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
           : item
       )
     })));
-  }, []);
+    markAsDirty();
+  }, [markAsDirty]);
 
   const updateItemOrderInfo = useCallback((itemId: string, info: any) => {
     const today = new Date().toISOString().split('T')[0];
@@ -85,15 +179,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
           
           if (info.hasOwnProperty('invoiceNumber')) {
             const hasInvoice = info.invoiceNumber && info.invoiceNumber.trim() !== '';
-            newStatus = hasInvoice 
-              ? 'ENTREGUE' 
-              : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
-            
-            if (hasInvoice && !arrivalDate) {
-              arrivalDate = today;
-            } else if (!hasInvoice && !info.status && newStatus !== 'ENTREGUE') {
-              arrivalDate = undefined;
-            }
+            newStatus = hasInvoice ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+            if (hasInvoice && !arrivalDate) arrivalDate = today;
           } else if (info.hasOwnProperty('orderNumber')) {
             if (item.status !== 'ENTREGUE') {
               newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
@@ -105,7 +192,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return item;
       })
     })));
-  }, []);
+    markAsDirty();
+  }, [markAsDirty]);
 
   const bulkUpdateItems = useCallback((itemIds: Set<string>, info: any) => {
     setSheets(prev => prev.map(sheet => ({
@@ -114,21 +202,29 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         itemIds.has(item.id) ? { ...item, ...info } : item
       )
     })));
-  }, []);
+    markAsDirty();
+  }, [markAsDirty]);
 
   const clearAllData = useCallback(() => {
-    if (window.confirm("Deseja apagar permanentemente todos os dados deste navegador?")) {
-      setSheets([]);
-      localStorage.removeItem(STORAGE_KEY);
+    const password = window.prompt("CUIDADO: Você está prestes a apagar TODOS os dados da plataforma. Digite a senha de segurança para continuar:");
+    if (password === '372812') {
+      if (window.confirm("Confirma a exclusão permanente de tudo?")) {
+        setSheets([]);
+        localStorage.removeItem(STORAGE_KEY);
+        isDirtyRef.current = true;
+        saveToSupabase([]);
+      }
+    } else if (password !== null) {
+      alert("Senha incorreta. Ação abortada.");
     }
-  }, []);
+  }, [saveToSupabase]);
 
   const exportAllData = useCallback(() => {
     const dataStr = JSON.stringify(sheets, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', `BACKUP_LOCAL_${new Date().getTime()}.json`);
+    linkElement.setAttribute('download', `BACKUP_CLOUDBUY_${new Date().getTime()}.json`);
     linkElement.click();
   }, [sheets]);
 
@@ -137,17 +233,19 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const parsed = JSON.parse(jsonData);
       if (Array.isArray(parsed)) {
         setSheets(parsed);
+        markAsDirty();
         return true;
       }
       return false;
     } catch (e) {
       return false;
     }
-  }, []);
+  }, [markAsDirty]);
 
   const forceSync = useCallback(() => {
-    console.log("Dados locais validados.");
-  }, []);
+    markAsDirty();
+    saveToSupabase(sheets);
+  }, [sheets, saveToSupabase, markAsDirty]);
 
   return (
     <ProcurementContext.Provider value={{ 
