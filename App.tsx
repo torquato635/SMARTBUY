@@ -59,7 +59,10 @@ import {
   FileUp,
   Trash2,
   Sparkles,
-  Bot
+  Bot,
+  Lock,
+  Key,
+  LogOut
 } from 'lucide-react';
 import { ProcurementProvider, useProcurement } from './ProcurementContext';
 import DashboardStats from './components/DashboardStats';
@@ -123,7 +126,9 @@ const MainContent = () => {
     exportAllData,
     importAllData,
     syncStatus,
-    lastSyncTime
+    lastSyncTime,
+    accessLevel,
+    setAccessLevel
   } = useProcurement();
   
   const [activeSheet, setActiveSheet] = useState<string>('All');
@@ -147,6 +152,9 @@ const MainContent = () => {
   const [loadingReceivingAi, setLoadingReceivingAi] = useState(false);
   const [lastAiUpdateTime, setLastAiUpdateTime] = useState<number | null>(null);
 
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState(false);
+
   // State para o modal de exclusão
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<{id: string, name: string} | null>(null);
   
@@ -155,6 +163,20 @@ const MainContent = () => {
   const projectItems = getActiveProjectItems();
   const allGlobalItems = getAllItems();
   const today = new Date().toISOString().split('T')[0];
+
+  const handleLogin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (passwordInput === '372812') {
+      setAccessLevel('TOTAL');
+      setLoginError(false);
+    } else if (passwordInput === '1234') {
+      setAccessLevel('VIEW');
+      setLoginError(false);
+    } else {
+      setLoginError(true);
+      setTimeout(() => setLoginError(false), 2000);
+    }
+  };
 
   const getItemCategory = useCallback((item: ProcurementItem) => {
     const uSheet = normalizeString(item.sheetName);
@@ -176,14 +198,13 @@ const MainContent = () => {
   // IA Insight Effect para Recebimento com Cache de 1h
   useEffect(() => {
     const fetchReceivingAi = async () => {
-      if (homeSubView !== 'receiving' || sheets.length === 0) return;
+      if (homeSubView !== 'receiving' || sheets.length === 0 || !accessLevel) return;
 
       const allItems = sheets.flatMap(s => s.items).filter(i => isItemInAnyCard(i));
       const relevantItems = allItems.filter(i => i.status === 'COMPRADO');
       const delayed = relevantItems.filter(i => i.expectedArrival && i.expectedArrival < today);
       const next7Days = relevantItems.filter(i => i.expectedArrival && i.expectedArrival >= today && i.expectedArrival <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
       
-      // Gerar fingerprint único para os dados atuais
       const dataFingerprint = `${relevantItems.length}-${delayed.length}-${next7Days.length}-${allItems.filter(i => i.status === 'ENTREGUE').length}`;
 
       const CACHE_KEY = 'receiving_ai_cache_v1';
@@ -193,17 +214,15 @@ const MainContent = () => {
         try {
           const { response, timestamp, fingerprint } = JSON.parse(cached);
           const now = Date.now();
-          const isExpired = now - timestamp > 3600000; // 1 hora em milissegundos
+          const isExpired = now - timestamp > 3600000; 
           const hasChanged = fingerprint !== dataFingerprint;
 
-          // Se não expirou, usamos o cache mesmo que tenha mudado (mantém estável por 1h)
           if (!isExpired) {
             setReceivingAiSummary(response);
             setLastAiUpdateTime(timestamp);
             return;
           }
 
-          // Se expirou mas os dados são IGUAIS, apenas renovamos o timestamp e usamos o cache
           if (isExpired && !hasChanged) {
             localStorage.setItem(CACHE_KEY, JSON.stringify({ response, timestamp: now, fingerprint: dataFingerprint }));
             setReceivingAiSummary(response);
@@ -215,7 +234,6 @@ const MainContent = () => {
         }
       }
 
-      // Se chegamos aqui, ou não tem cache, ou expirou e os dados mudaram
       setLoadingReceivingAi(true);
       const summary = await getReceivingInsights(allItems);
       const updateTime = Date.now();
@@ -232,7 +250,7 @@ const MainContent = () => {
     };
 
     fetchReceivingAi();
-  }, [homeSubView, sheets, isItemInAnyCard, today]);
+  }, [homeSubView, sheets, isItemInAnyCard, today, accessLevel]);
 
   const globalMetrics = useMemo(() => {
     const allItems = sheets.flatMap(s => s.items.filter(i => isItemInAnyCard(i)));
@@ -307,7 +325,38 @@ const MainContent = () => {
   }, [sheets, logisticsGlobalSearch, logisticsFilters, logisticsSnapshots, isItemInAnyCard, today]);
 
   const setProjectFilter = (projectId: string, filter: 'RECEBIDO' | 'A_RECEBER' | 'ATRASADO' | 'ALL') => {
+    const currentActiveFilter = logisticsFilters[projectId] || 'ALL';
+    
+    if (currentActiveFilter === filter && filter !== 'ALL') {
+      setLogisticsFilters(prev => ({ ...prev, [projectId]: 'ALL' }));
+      setExpandedProjects(prev => {
+        const next = new Set(prev);
+        next.delete(projectId);
+        return next;
+      });
+      setLogisticsSnapshots(prev => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      return;
+    }
+
     setLogisticsFilters(prev => ({ ...prev, [projectId]: filter }));
+    
+    if (filter !== 'ALL') {
+      setExpandedProjects(prev => {
+        const next = new Set(prev);
+        next.add(projectId);
+        return next;
+      });
+    } else {
+      setExpandedProjects(prev => {
+        const next = new Set(prev);
+        next.delete(projectId);
+        return next;
+      });
+    }
     
     if (filter === 'ALL') {
       setLogisticsSnapshots(prev => {
@@ -547,7 +596,7 @@ const MainContent = () => {
 
   const handleExportWithPassword = () => {
     const password = window.prompt("Digite a senha de segurança para EXPORTAR o backup dos dados:");
-    if (password === '372812') {
+    if (password === '372812' || password === '1234') {
       exportAllData();
     } else if (password !== null) {
       alert("Senha incorreta. Operação cancelada.");
@@ -559,7 +608,7 @@ const MainContent = () => {
     if (password === '372812') {
       fileInputRef.current?.click();
     } else if (password !== null) {
-      alert("Senha incorreta. Operação cancelada.");
+      alert("Somente usuários com acesso TOTAL podem importar backups.");
     }
   };
 
@@ -607,6 +656,10 @@ const MainContent = () => {
 
   const handleDeleteProjectClick = (e: React.MouseEvent, id: string, name: string) => {
     e.stopPropagation();
+    if (accessLevel === 'VIEW') {
+      alert('Acesso Negado: Somente usuários com permissão TOTAL podem excluir projetos.');
+      return;
+    }
     setDeleteConfirmProject({ id, name });
   };
 
@@ -622,17 +675,95 @@ const MainContent = () => {
     }
   };
 
+  if (!accessLevel) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }} 
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-slate-900 border border-slate-800 p-12 rounded-[3rem] shadow-2xl max-w-md w-full relative overflow-hidden"
+        >
+          <div className="absolute -right-10 -top-10 opacity-5">
+            <Lock className="w-40 h-40 text-emerald-500" />
+          </div>
+          
+          <div className="text-center mb-10">
+            <h1 className="text-2xl font-black text-white tracking-tighter uppercase leading-none mb-2">
+              BORTO <span className="text-emerald-500">SMARTBUY</span>
+            </h1>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Painel de Segurança</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">INSIRA SEU TOKEN</label>
+              <div className="relative group">
+                <Key className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-500/50 group-focus-within:text-emerald-500 transition-colors" />
+                <input 
+                  type="password" 
+                  autoFocus
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="********"
+                  className={`w-full bg-slate-950 border-2 ${loginError ? 'border-rose-500 ring-4 ring-rose-500/10' : 'border-slate-800 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10'} rounded-2xl py-4 pl-14 pr-6 text-white font-black outline-none transition-all placeholder:text-slate-800`}
+                />
+              </div>
+              <AnimatePresence>
+                {loginError && (
+                  <motion.p initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="text-[10px] font-black text-rose-500 uppercase tracking-widest ml-2 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5" /> Senha Incorreta
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20 uppercase text-xs tracking-widest flex items-center justify-center gap-2"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>ENTRAR</span>
+            </button>
+          </form>
+
+          <div className="mt-8 pt-8 border-t border-slate-800 flex flex-col items-center gap-3">
+             <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5 opacity-40">
+                   <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                   <span className="text-[8px] font-black text-white uppercase tracking-tighter">Total</span>
+                </div>
+                <div className="flex items-center gap-1.5 opacity-40">
+                   <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                   <span className="text-[8px] font-black text-white uppercase tracking-tighter">Viewer</span>
+                </div>
+             </div>
+             <p className="text-[8px] font-bold text-slate-600 uppercase">Sistema de Proteção Industrial</p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-12 font-sans flex flex-col">
       <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-30 print:hidden shadow-sm">
         <div className="w-full px-6 md:px-10 h-20 flex items-center justify-between">
-          <div className="flex items-center space-x-4 cursor-pointer" onClick={() => { setView('projects'); setActiveProjectId(null); setVisibleItemIds(null); }}>
-            <div>
+          <div className="flex items-center space-x-4">
+            <div className="cursor-pointer" onClick={() => { setView('projects'); setActiveProjectId(null); setVisibleItemIds(null); }}>
               <h1 className="text-2xl font-black text-white tracking-tighter uppercase leading-none">
                 BORTO <span className="text-emerald-500">SMARTBUY</span>
               </h1>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Soluções em Máquinas</p>
             </div>
+            
+            {/* BOTÃO SAIR / LOGOUT REPOSICIONADO PARA O LADO DO NOME */}
+            <button 
+              onClick={() => setAccessLevel(null)} 
+              className="p-1.5 bg-emerald-500/10 hover:bg-rose-500/20 text-emerald-500 hover:text-rose-500 rounded-lg transition-all border border-emerald-500/20 hover:border-rose-500/30 ml-2"
+              title="Sair / Trocar Acesso"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
           
           <div className="flex items-center space-x-6">
@@ -674,7 +805,9 @@ const MainContent = () => {
                 <div className="w-px h-3 bg-slate-800" />
                 <div className="flex items-center space-x-2 text-emerald-400/70 group-hover:text-emerald-400 transition-colors">
                    <ShieldCheck className="w-3.5 h-3.5" />
-                   <span className="text-[9px] font-black uppercase tracking-tight">Safe Mode</span>
+                   <span className="text-[9px] font-black uppercase tracking-tight">
+                     {accessLevel === 'TOTAL' ? 'ACESSO TOTAL' : 'VIEWER MODE'}
+                   </span>
                 </div>
              </div>
           </div>
@@ -794,8 +927,7 @@ const MainContent = () => {
                   </div>
 
                   <div className="flex flex-col lg:flex-row gap-8 items-start">
-                    {/* IA LOGISTICS SIDEBAR COM CACHE PERSISTENTE */}
-                    <div className="w-full lg:w-1/4 sticky top-28 print:hidden">
+                    <div className="w-full lg:w-1/4 sticky top-28 print:hidden order-first lg:order-none">
                       <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col ring-1 ring-emerald-500/20">
                         <div className="p-6 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
                           <div className="flex items-center gap-2">
@@ -844,7 +976,6 @@ const MainContent = () => {
                       </div>
                     </div>
 
-                    {/* MAIN LOGISTICS CONTENT */}
                     <div className="flex-1 w-full space-y-8">
                       {logisticsGlobalSearch ? (
                         <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 shadow-xl overflow-hidden animate-fade-in">
@@ -895,9 +1026,7 @@ const MainContent = () => {
                                       </td>
                                       <td className="px-8 py-4">
                                          {item.status === 'ENTREGUE' ? (
-                                            <span className="px-4 py-1.5 bg-emerald-950 text-emerald-400 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border border-emerald-900/50">
-                                              <CheckCircle2 className="w-3.5 h-3.5" /> RECEBIDO
-                                            </span>
+                                            <span className="px-4 py-1.5 bg-emerald-950 text-emerald-400 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border border-emerald-900/50"><CheckCircle2 className="w-3.5 h-3.5" /> RECEBIDO</span>
                                          ) : (
                                             <span className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border ${isAtrasado ? 'bg-rose-950 text-rose-500 border-rose-900/50' : 'bg-emerald-950 text-emerald-400 border-emerald-900/50'}`}>
                                               {isAtrasado ? <AlertCircle className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />} {isAtrasado ? 'ATRASADO' : 'A RECEBER'}
@@ -941,7 +1070,7 @@ const MainContent = () => {
                                    </div>
                                 </div>
                                 {expandedProjects.has(project.id) && (
-                                  <div className="border-t border-slate-800 p-0 animate-fade-in">
+                                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="border-t border-slate-800 p-0 overflow-hidden">
                                     <div className="overflow-x-auto">
                                       <table className="w-full text-left border-collapse min-w-[1100px]">
                                         <thead>
@@ -971,7 +1100,7 @@ const MainContent = () => {
                                         </tbody>
                                       </table>
                                     </div>
-                                  </div>
+                                  </motion.div>
                                 )}
                               </div>
                             );
@@ -1112,7 +1241,6 @@ const MainContent = () => {
                 </div>
               )}
 
-              {/* BARRA DE AÇÕES EM MASSA GLOBAL */}
               <AnimatePresence>
                 {selectedIds.size > 0 && (
                   <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center space-x-6 px-10 py-5 bg-slate-900 border border-slate-800 rounded-[2.5rem] shadow-2xl text-white backdrop-blur-md max-w-[90vw] overflow-x-auto whitespace-nowrap scrollbar-hide print:hidden ring-1 ring-emerald-500/30">
@@ -1152,7 +1280,6 @@ const MainContent = () => {
           ) : null}
         </AnimatePresence>
 
-        {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO CUSTOMIZADO */}
         <AnimatePresence>
           {deleteConfirmProject && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 print:hidden">

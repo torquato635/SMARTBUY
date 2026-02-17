@@ -6,11 +6,15 @@ import { supabase } from './lib/supabase';
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
 const SUPABASE_TABLE = 'app_data';
 
+export type AccessLevel = 'TOTAL' | 'VIEW' | null;
+
 interface ProcurementContextType {
   sheets: Sheet[];
   activeProjectId: string | null;
   syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending';
   lastSyncTime: Date | null;
+  accessLevel: AccessLevel;
+  setAccessLevel: (level: AccessLevel) => void;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
   setActiveProjectId: (id: string | null) => void;
@@ -33,11 +37,25 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending'>('loading');
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [accessLevel, setAccessLevel] = useState<AccessLevel>(null);
   
   const isDirtyRef = useRef(false);
 
+  const checkAccess = useCallback(() => {
+    if (accessLevel === 'VIEW') {
+      alert("ACESSO NEGADO: Seu nível de acesso permite apenas VISUALIZAÇÃO.");
+      return false;
+    }
+    if (accessLevel !== 'TOTAL') {
+      alert("ACESSO NEGADO: Você precisa estar autenticado.");
+      return false;
+    }
+    return true;
+  }, [accessLevel]);
+
   const saveToSupabase = useCallback(async (data: Sheet[]) => {
     if (!isInitialLoadComplete || !isDirtyRef.current) return;
+    if (accessLevel !== 'TOTAL') return; // Segurança extra para não salvar nada se for VIEW
 
     setSyncStatus('saving');
     try {
@@ -54,7 +72,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       console.error('Erro ao sincronizar com Supabase:', err);
       setSyncStatus('error');
     }
-  }, [isInitialLoadComplete]);
+  }, [isInitialLoadComplete, accessLevel]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -117,7 +135,6 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
     
-    // Intervalo de 1,5 segundos conforme solicitado
     const timeoutId = setTimeout(() => {
       saveToSupabase(sheets);
     }, 1500); 
@@ -126,20 +143,23 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [sheets, saveToSupabase, isInitialLoadComplete]);
 
   const markAsDirty = useCallback(() => {
+    if (accessLevel !== 'TOTAL') return;
     isDirtyRef.current = true;
     setSyncStatus('pending');
-  }, []);
+  }, [accessLevel]);
 
   const addSheet = useCallback((sheet: Sheet) => {
+    if (!checkAccess()) return;
     setSheets(prev => [...prev, sheet]);
     markAsDirty();
-  }, [markAsDirty]);
+  }, [markAsDirty, checkAccess]);
 
   const removeSheet = useCallback((id: string) => {
+    if (!checkAccess()) return;
     setSheets(prev => prev.filter(s => s.id !== id));
     if (activeProjectId === id) setActiveProjectId(null);
     markAsDirty();
-  }, [activeProjectId, markAsDirty]);
+  }, [activeProjectId, markAsDirty, checkAccess]);
 
   const getAllItems = useCallback(() => {
     return sheets.flatMap(s => s.items);
@@ -152,6 +172,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [sheets, activeProjectId]);
 
   const updateItemStatus = useCallback((itemId: string, newStatus: ItemStatus) => {
+    if (!checkAccess()) return;
     const today = new Date().toISOString().split('T')[0];
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
@@ -166,9 +187,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       )
     })));
     markAsDirty();
-  }, [markAsDirty]);
+  }, [markAsDirty, checkAccess]);
 
   const updateItemOrderInfo = useCallback((itemId: string, info: any) => {
+    if (!checkAccess()) return;
     const today = new Date().toISOString().split('T')[0];
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
@@ -193,9 +215,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       })
     })));
     markAsDirty();
-  }, [markAsDirty]);
+  }, [markAsDirty, checkAccess]);
 
   const bulkUpdateItems = useCallback((itemIds: Set<string>, info: any) => {
+    if (!checkAccess()) return;
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
       items: sheet.items.map(item => 
@@ -203,9 +226,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       )
     })));
     markAsDirty();
-  }, [markAsDirty]);
+  }, [markAsDirty, checkAccess]);
 
   const clearAllData = useCallback(() => {
+    if (!checkAccess()) return;
     const password = window.prompt("CUIDADO: Você está prestes a apagar TODOS os dados da plataforma. Digite a senha de segurança para continuar:");
     if (password === '372812') {
       if (window.confirm("Confirma a exclusão permanente de tudo?")) {
@@ -217,9 +241,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } else if (password !== null) {
       alert("Senha incorreta. Ação abortada.");
     }
-  }, [saveToSupabase]);
+  }, [saveToSupabase, checkAccess]);
 
   const exportAllData = useCallback(() => {
+    // Exportação permitida para VIEW também, para fins de backup
     const dataStr = JSON.stringify(sheets, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const linkElement = document.createElement('a');
@@ -229,6 +254,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [sheets]);
 
   const importAllData = useCallback((jsonData: string) => {
+    if (!checkAccess()) return false;
     try {
       const parsed = JSON.parse(jsonData);
       if (Array.isArray(parsed)) {
@@ -240,12 +266,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch (e) {
       return false;
     }
-  }, [markAsDirty]);
+  }, [markAsDirty, checkAccess]);
 
   const forceSync = useCallback(() => {
+    if (!checkAccess()) return;
     markAsDirty();
     saveToSupabase(sheets);
-  }, [sheets, saveToSupabase, markAsDirty]);
+  }, [sheets, saveToSupabase, markAsDirty, checkAccess]);
 
   return (
     <ProcurementContext.Provider value={{ 
@@ -253,6 +280,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       activeProjectId, 
       syncStatus,
       lastSyncTime,
+      accessLevel,
+      setAccessLevel,
       addSheet, 
       removeSheet, 
       setActiveProjectId,
