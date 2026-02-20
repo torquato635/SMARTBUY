@@ -1,4 +1,3 @@
-
 import React, { useMemo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { 
@@ -134,9 +133,9 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
   }, [items, today]);
 
   if (!metrics) return (
-    <div className="p-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
-       <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-       <p className="text-slate-500 font-black uppercase text-xs">Aguardando dados para gerar o relatório...</p>
+    <div className="p-20 text-center bg-[var(--bg-card)] rounded-[3rem] border-2 border-dashed border-[var(--border-color)]">
+       <Database className="w-12 h-12 text-[var(--text-secondary)]/30 mx-auto mb-4" />
+       <p className="text-[var(--text-secondary)] font-black uppercase text-xs">Aguardando dados para gerar o relatório...</p>
     </div>
   );
 
@@ -145,11 +144,11 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
       
       {/* ALERTA DE INTEGRIDADE (Check do Comprador) */}
       {(metrics.itemsSemData > 0 || metrics.itemsSemFornecedor > (metrics.total * 0.3)) && (
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex items-start gap-4 print:hidden shadow-sm">
-           <div className="p-3 bg-amber-100 text-amber-700 rounded-2xl"><ShieldAlert className="w-6 h-6" /></div>
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-[2rem] flex items-start gap-4 print:hidden shadow-sm">
+           <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl"><ShieldAlert className="w-6 h-6" /></div>
            <div>
-              <h4 className="text-sm font-black text-amber-900 uppercase mb-1">Atenção: Integridade dos Dados</h4>
-              <p className="text-xs text-amber-800 leading-relaxed font-medium">
+              <h4 className="text-sm font-black text-amber-500 uppercase mb-1">Atenção: Integridade dos Dados</h4>
+              <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed font-medium">
                 Detectamos que <span className="font-bold">{metrics.itemsSemData} itens comprados</span> estão sem data de previsão e <span className="font-bold">{metrics.itemsSemFornecedor} itens</span> estão sem fornecedor. 
                 Isso compromete a precisão da Curva S e da análise de riscos da IA.
               </p>
@@ -159,36 +158,36 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
 
       {/* HEADER E SCORE CARD */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        <div className="lg:col-span-3 bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
+        <div className="lg:col-span-3 bg-[var(--bg-card)] p-10 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
            <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
-                 <div className="p-2 bg-indigo-50 text-indigo-800 rounded-lg"><Activity className="w-5 h-5" /></div>
-                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Painel de Controle de Suprimentos</h3>
+                 <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-lg"><Activity className="w-5 h-5" /></div>
+                 <h3 className="text-[10px] font-black text-[var(--text-secondary)] uppercase tracking-widest">Painel de Controle de Suprimentos</h3>
               </div>
-              <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tight leading-none mb-4">{projectName}</h1>
+              <h1 className="text-4xl font-black text-[var(--text-primary)] uppercase tracking-tight leading-none mb-4">{projectName}</h1>
               
               <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mt-8">
                  <div>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Entregas Físicas</p>
+                    <p className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest mb-1">Entregas Físicas</p>
                     <div className="flex items-center gap-2">
                        <span className="text-3xl font-black text-emerald-600">{metrics.physicalProgress}%</span>
                        <TrendingUp className="w-4 h-4 text-emerald-500" />
                     </div>
                  </div>
                  <div>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Carteira de Pedidos</p>
+                    <p className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest mb-1">Carteira de Pedidos</p>
                     <span className="text-3xl font-black text-indigo-600">{metrics.orderProgress}%</span>
                  </div>
                  <div className="hidden md:block">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Itens Totais</p>
-                    <span className="text-3xl font-black text-slate-900">{metrics.total}</span>
+                    <p className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest mb-1">Itens Totais</p>
+                    <span className="text-3xl font-black text-[var(--text-primary)]">{metrics.total}</span>
                  </div>
               </div>
            </div>
            
            <div className="relative group">
-              <div className="w-40 h-40 rounded-full border-[12px] border-slate-50 flex flex-col items-center justify-center shadow-inner bg-white ring-1 ring-slate-100">
-                 <span className="text-[10px] font-black text-slate-400 uppercase mb-0.5 tracking-widest">SCORE</span>
+              <div className="w-40 h-40 rounded-full border-[12px] border-[var(--bg-inner)] flex flex-col items-center justify-center shadow-inner bg-[var(--bg-card)] ring-1 ring-[var(--border-color)]">
+                 <span className="text-[10px] font-black text-[var(--text-secondary)] uppercase mb-0.5 tracking-widest">SCORE</span>
                  <span className={`text-6xl font-black tracking-tighter ${metrics.score > 80 ? 'text-emerald-600' : 'text-amber-600'}`}>{metrics.score}</span>
               </div>
               <div className={`absolute -bottom-2 -right-2 p-3 rounded-2xl shadow-lg text-white ${metrics.score > 80 ? 'bg-emerald-600' : 'bg-amber-600'}`}>
@@ -215,7 +214,7 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* IA PROCUREMENT ADVISOR (Gemini 3 Pro) */}
-        <div className="lg:col-span-2 bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
+        <div className="lg:col-span-2 bg-slate-950 dark:bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
            <div className="p-8 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
               <h3 className="text-xs font-black text-white uppercase tracking-[0.2em] flex items-center gap-3">
                  <Sparkles className="w-5 h-5 text-emerald-400 animate-pulse" /> Gemini Strategic Advisor 3.0
@@ -233,9 +232,9 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
            </div>
         </div>
 
-        {/* GARGALOS POR CATEGORIA (Novo Funcional) */}
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col h-[600px]">
-           <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-10 flex items-center gap-2">
+        {/* GARGALOS POR CATEGORIA */}
+        <div className="bg-[var(--bg-card)] p-8 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col h-[600px]">
+           <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest mb-10 flex items-center gap-2">
               <Layers className="w-5 h-5 text-indigo-600" /> Gargalos por Categoria
            </h3>
            <div className="flex-1 w-full">
@@ -258,8 +257,8 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
         </div>
 
         {/* PERFORMANCE DE FORNECEDORES (TOP 6) */}
-        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col h-[550px]">
-           <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-10 flex items-center gap-2">
+        <div className="bg-[var(--bg-card)] p-10 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col h-[550px]">
+           <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest mb-10 flex items-center gap-2">
               <Users className="w-5 h-5 text-indigo-600" /> Performance de Fornecedores
            </h3>
            <div className="space-y-8 flex-1 overflow-y-auto custom-scrollbar pr-2">
@@ -267,14 +266,14 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
                 <div key={idx} className="group">
                    <div className="flex justify-between items-end mb-3">
                       <div>
-                        <p className="text-[10px] font-black text-slate-900 uppercase truncate max-w-[180px]">{vendor.name}</p>
-                        <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{vendor.total} Itens Vinculados</p>
+                        <p className="text-[10px] font-black text-[var(--text-primary)] uppercase truncate max-w-[180px]">{vendor.name}</p>
+                        <p className="text-[8px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">{vendor.total} Itens Vinculados</p>
                       </div>
                       <span className={`text-[10px] font-black ${vendor.efficiency === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>
                         {vendor.efficiency}%
                       </span>
                    </div>
-                   <div className="w-full h-2.5 bg-slate-50 rounded-full overflow-hidden border border-slate-100 p-0.5">
+                   <div className="w-full h-2.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)] p-0.5">
                       <motion.div 
                         initial={{ width: 0 }} 
                         animate={{ width: `${vendor.efficiency}%` }} 
@@ -284,7 +283,7 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
                 </div>
               ))}
               {metrics.vendorData.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4">
+                <div className="h-full flex flex-col items-center justify-center text-[var(--text-secondary)]/30 gap-4">
                   <PackageSearch className="w-12 h-12 opacity-30" />
                   <p className="text-[10px] font-black uppercase">Nenhum fornecedor identificado</p>
                 </div>
@@ -292,20 +291,20 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
            </div>
         </div>
 
-        {/* CURVA S DE PERFORMANCE (PREVISTO VS REAL) */}
-        <div className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col h-[550px]">
+        {/* CURVA S DE PERFORMANCE */}
+        <div className="lg:col-span-2 bg-[var(--bg-card)] p-10 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col h-[550px]">
            <div className="flex items-center justify-between mb-10">
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+              <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest flex items-center gap-2">
                  <Calendar className="w-5 h-5 text-indigo-600" /> Curva S de Suprimentos
               </h3>
               <div className="flex items-center gap-6">
                  <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                    <span className="text-[9px] font-black text-slate-500 uppercase">Realizado</span>
+                    <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase">Realizado</span>
                  </div>
                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-slate-200" />
-                    <span className="text-[9px] font-black text-slate-500 uppercase">Previsto</span>
+                    <div className="w-3 h-3 rounded-full bg-[var(--text-secondary)]/20" />
+                    <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase">Previsto</span>
                  </div>
               </div>
            </div>
@@ -319,13 +318,13 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
                       <Tooltip 
                         contentStyle={{ borderRadius: '1.5rem', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '1rem' }}
                       />
-                      <Area type="monotone" dataKey="previsto" fill="#f8fafc" stroke="#e2e8f0" strokeWidth={2} strokeDasharray="5 5" />
+                      <Area type="monotone" dataKey="previsto" fill="rgba(99, 102, 241, 0.05)" stroke="rgba(99, 102, 241, 0.2)" strokeWidth={2} strokeDasharray="5 5" />
                       <Line type="monotone" dataKey="realizado" stroke="#10b981" strokeWidth={5} dot={{ r: 6, fill: '#10b981', strokeWidth: 4, stroke: '#fff' }} activeDot={{ r: 8 }} />
                    </ComposedChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-6">
-                   <div className="p-6 bg-slate-50 rounded-full"><ListChecks className="w-10 h-10 opacity-30" /></div>
+                <div className="h-full flex flex-col items-center justify-center text-[var(--text-secondary)]/30 gap-6">
+                   <div className="p-6 bg-[var(--bg-inner)] rounded-full"><ListChecks className="w-10 h-10 opacity-30" /></div>
                    <p className="text-[10px] font-black uppercase max-w-[250px] text-center leading-relaxed">
                       Preencha a coluna de <span className="text-indigo-600">PREVISÃO</span> nas linhas da planilha para habilitar a Curva S de evolução.
                    </p>

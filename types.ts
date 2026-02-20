@@ -1,4 +1,3 @@
-
 import { 
   Zap, 
   Settings, 
@@ -7,7 +6,8 @@ import {
   Package, 
   Layers,
   Flame,
-  Factory
+  Factory,
+  StickyNote
 } from 'lucide-react';
 
 export enum ItemType {
@@ -29,6 +29,23 @@ export interface ProcurementItem {
   supplier?: string;
   status: ItemStatus;
   dueDate?: string;
+  orderNumber?: string;
+  expectedArrival?: string;
+  invoiceNumber?: string;
+  actualArrivalDate?: string;
+}
+
+export interface ManualRequest {
+  id: string;
+  project: string;
+  code: string;
+  description: string;
+  quantity: number;
+  brand: string;
+  type: ItemType;
+  timestamp: string;
+  status?: ItemStatus;
+  supplier?: string;
   orderNumber?: string;
   expectedArrival?: string;
   invoiceNumber?: string;
@@ -58,5 +75,6 @@ export const CATEGORY_CONFIG: Record<string, { color: string; icon: any; label: 
   'PNEUMATICA': { color: 'orange', icon: Wind, label: 'Pneumática', bg: 'bg-orange-50', text: 'text-orange-600', keywords: ['PNEUMATICA'] },
   'ITENS COMERCIAIS': { color: 'violet', icon: Package, label: 'Itens Comerciais', bg: 'bg-violet-50', text: 'text-violet-600', keywords: ['MONTAGEM', 'COMERCIAL'] },
   'SOLDA': { color: 'rose', icon: Flame, label: 'Solda', bg: 'bg-rose-50', text: 'text-rose-600', keywords: ['SOLDA'] },
+  'MANUAL': { color: 'emerald', icon: StickyNote, label: 'SOLICITAÇÃO FORA DE LISTA', bg: 'bg-emerald-50', text: 'text-emerald-600', keywords: ['SOLICITAÇÃO FORA DE LISTA', 'DEMANDA MANUAL'] },
   'All': { color: 'slate', icon: Layers, label: 'Visão Geral', bg: 'bg-slate-50', text: 'text-slate-600', keywords: [] }
 };

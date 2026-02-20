@@ -1,4 +1,3 @@
-
 import React, { useMemo, useCallback } from 'react';
 import { useProcurement } from '../ProcurementContext';
 import { Clock, ShoppingCart, CheckCircle2, Package, AlertTriangle, ArrowRight } from 'lucide-react';
@@ -78,7 +77,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
     { name: 'RESTANTE', value: 100 - metrics.purchaseEvolution },
   ];
 
-  const GAUGE_COLORS = ['#10b981', 'rgba(255,255,255,0.05)'];
+  const GAUGE_COLORS = ['#10b981', 'rgba(148, 163, 184, 0.1)'];
 
   const FilterButton = ({ 
     label, 
@@ -95,16 +94,16 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
   }) => (
     <button 
       onClick={onClick}
-      className={`flex flex-col p-5 rounded-3xl border border-white/10 transition-all hover:bg-emerald-900/60 hover:scale-[1.02] active:scale-95 text-left group bg-[#022c22]`}
+      className={`flex flex-col p-5 rounded-3xl border border-[var(--border-color)] transition-all hover:bg-emerald-500/5 hover:scale-[1.02] active:scale-95 text-left group bg-[var(--bg-card)]`}
     >
       <div className="flex items-center justify-between mb-2">
-        <div className={`p-2.5 rounded-xl ${colorClass} bg-black/30 shadow-sm border border-white/5`}>
+        <div className={`p-2.5 rounded-xl ${colorClass} bg-emerald-500/10 shadow-sm border border-emerald-500/5`}>
           <Icon className="w-4 h-4" />
         </div>
-        <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white/60 transition-colors" />
+        <ArrowRight className="w-4 h-4 text-[var(--text-secondary)]/20 group-hover:text-emerald-500 transition-colors" />
       </div>
-      <span className="text-[10px] font-black text-emerald-50 uppercase tracking-widest mb-1">{label}</span>
-      <span className={`text-2xl font-black text-white`}>{value}</span>
+      <span className="text-[10px] font-black text-[var(--text-secondary)] uppercase tracking-widest mb-1">{label}</span>
+      <span className={`text-2xl font-black text-[var(--text-primary)]`}>{value}</span>
     </button>
   );
 
@@ -113,8 +112,9 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div 
           onClick={() => onStatusFilter('ENTREGUE')}
-          className="lg:col-span-1 bg-gradient-to-br from-[#020617] to-[#022c22] p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/30 transition-all group"
+          className="lg:col-span-1 bg-gradient-to-br from-[#020617] to-[#022c22] dark:from-[#020617] dark:to-[#022c22] p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/30 transition-all group"
         >
+          {/* O gráfico de evolução sempre mantém o fundo escuro industrial para identidade visual da marca Alltech */}
           <div className="absolute top-0 left-0 w-full h-1.5 bg-emerald-500/50" />
           <p className="text-sm font-black text-emerald-50 uppercase tracking-[0.25em] mb-6 text-center group-hover:text-white transition-colors">
             EVOLUÇÃO DE COMPRAS
@@ -159,7 +159,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
           </div>
         </div>
 
-        <div className="lg:col-span-3 bg-slate-950 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center gap-10">
+        <div className="lg:col-span-3 bg-[var(--bg-card)] p-10 rounded-[3.5rem] border border-[var(--border-color)] shadow-2xl flex flex-col md:flex-row items-center gap-10">
           <div 
             onClick={() => onStatusFilter('ALL')}
             className="flex items-center space-x-8 shrink-0 cursor-pointer group"
@@ -168,39 +168,39 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
               <Package className="w-12 h-12" />
             </div>
             <div>
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">TOTAL DE ITENS</p>
-              <p className="text-6xl font-black text-white tracking-tighter">{metrics.total}</p>
+              <p className="text-[11px] font-black text-[var(--text-secondary)] uppercase tracking-[0.2em] mb-2">TOTAL DE ITENS</p>
+              <p className="text-6xl font-black text-[var(--text-primary)] tracking-tighter">{metrics.total}</p>
             </div>
           </div>
           
-          <div className="h-24 w-px bg-slate-800 hidden md:block" />
+          <div className="h-24 w-px bg-[var(--border-color)] hidden md:block" />
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 flex-1 w-full">
             <FilterButton 
               label="Comprados" 
               value={metrics.comprados} 
-              colorClass="text-emerald-400" 
+              colorClass="text-emerald-500" 
               icon={ShoppingCart}
               onClick={() => onStatusFilter('COMPRADO')}
             />
             <FilterButton 
               label="Entregues" 
               value={metrics.entregues} 
-              colorClass="text-emerald-400" 
+              colorClass="text-emerald-500" 
               icon={CheckCircle2}
               onClick={() => onStatusFilter('ENTREGUE')}
             />
             <FilterButton 
               label="Pendente" 
               value={metrics.pendentes} 
-              colorClass="text-amber-400" 
+              colorClass="text-amber-500" 
               icon={Clock}
               onClick={() => onStatusFilter('PENDENTE')}
             />
             <FilterButton 
               label="Em Atraso" 
               value={metrics.atrasados} 
-              colorClass="text-rose-400" 
+              colorClass="text-rose-500" 
               icon={AlertTriangle}
               onClick={() => onStatusFilter('ATRASADO')}
             />

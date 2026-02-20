@@ -1,6 +1,5 @@
-
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { Sheet, ProcurementItem, ItemStatus } from './types';
+import { Sheet, ProcurementItem, ItemStatus, ManualRequest } from './types';
 import { supabase } from './lib/supabase';
 
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
@@ -10,6 +9,7 @@ export type AccessLevel = 'TOTAL' | 'VIEW' | null;
 
 interface ProcurementContextType {
   sheets: Sheet[];
+  manualRequests: ManualRequest[];
   activeProjectId: string | null;
   syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending';
   lastSyncTime: Date | null;
@@ -17,12 +17,16 @@ interface ProcurementContextType {
   setAccessLevel: (level: AccessLevel) => void;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
+  renameSheet: (id: string, newName: string) => void;
   setActiveProjectId: (id: string | null) => void;
   getAllItems: () => ProcurementItem[];
   getActiveProjectItems: () => ProcurementItem[];
   updateItemStatus: (itemId: string, newStatus: ItemStatus) => void;
   updateItemOrderInfo: (itemId: string, info: any) => void;
   bulkUpdateItems: (itemIds: Set<string>, info: any) => void;
+  addManualRequest: (req: ManualRequest) => void;
+  removeManualRequest: (id: string) => void;
+  updateManualRequestInfo: (id: string, info: any) => void;
   clearAllData: () => void;
   exportAllData: () => void;
   importAllData: (jsonData: string) => boolean;
@@ -31,8 +35,19 @@ interface ProcurementContextType {
 
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
 
+const normalizeString = (str: string): string => {
+  if (!str) return "";
+  return str
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .trim();
+};
+
 export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [sheets, setSheets] = useState<Sheet[]>([]);
+  const [manualRequests, setManualRequests] = useState<ManualRequest[]>([]);
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending'>('loading');
@@ -53,15 +68,16 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return true;
   }, [accessLevel]);
 
-  const saveToSupabase = useCallback(async (data: Sheet[]) => {
+  const saveToSupabase = useCallback(async (data: Sheet[], manual: ManualRequest[]) => {
     if (!isInitialLoadComplete || !isDirtyRef.current) return;
-    if (accessLevel !== 'TOTAL') return; // Segurança extra para não salvar nada se for VIEW
+    if (accessLevel !== 'TOTAL') return;
 
     setSyncStatus('saving');
     try {
+      const payload = { sheets: data, manualRequests: manual };
       const { error } = await supabase
         .from(SUPABASE_TABLE)
-        .upsert({ id: 1, payload: data, updated_at: new Date() }, { onConflict: 'id' });
+        .upsert({ id: 1, payload: payload, updated_at: new Date() }, { onConflict: 'id' });
 
       if (error) throw error;
       
@@ -86,12 +102,28 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (error && error.code !== 'PGRST116') throw error;
 
-        if (data && data.payload && Array.isArray(data.payload)) {
-          setSheets(data.payload);
+        if (data && data.payload) {
+          const payload = data.payload;
+          if (Array.isArray(payload)) {
+            setSheets(payload);
+            setManualRequests([]);
+          } else {
+            setSheets(payload.sheets || []);
+            setManualRequests(payload.manualRequests || []);
+          }
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data.payload));
         } else {
           const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) setSheets(JSON.parse(saved));
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              setSheets(parsed);
+              setManualRequests([]);
+            } else {
+              setSheets(parsed.sheets || []);
+              setManualRequests(parsed.manualRequests || []);
+            }
+          }
         }
         
         setIsInitialLoadComplete(true);
@@ -100,7 +132,16 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       } catch (err) {
         console.error('Erro ao carregar do Supabase:', err);
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) setSheets(JSON.parse(saved));
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setSheets(parsed);
+            setManualRequests([]);
+          } else {
+            setSheets(parsed.sheets || []);
+            setManualRequests(parsed.manualRequests || []);
+          }
+        }
         setIsInitialLoadComplete(true);
         setSyncStatus('offline');
       }
@@ -117,7 +158,14 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         { event: 'UPDATE', schema: 'public', table: SUPABASE_TABLE, filter: 'id=eq.1' },
         (payload) => {
           if (!isDirtyRef.current && payload.new && payload.new.payload) {
-            setSheets(payload.new.payload);
+            const newData = payload.new.payload;
+            if (Array.isArray(newData)) {
+              setSheets(newData);
+              setManualRequests([]);
+            } else {
+              setSheets(newData.sheets || []);
+              setManualRequests(newData.manualRequests || []);
+            }
             setLastSyncTime(new Date());
             setSyncStatus('synced');
           }
@@ -133,14 +181,14 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     if (!isInitialLoadComplete) return;
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ sheets, manualRequests }));
     
     const timeoutId = setTimeout(() => {
-      saveToSupabase(sheets);
+      saveToSupabase(sheets, manualRequests);
     }, 1500); 
     
     return () => clearTimeout(timeoutId);
-  }, [sheets, saveToSupabase, isInitialLoadComplete]);
+  }, [sheets, manualRequests, saveToSupabase, isInitialLoadComplete]);
 
   const markAsDirty = useCallback(() => {
     if (accessLevel !== 'TOTAL') return;
@@ -161,6 +209,17 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     markAsDirty();
   }, [activeProjectId, markAsDirty, checkAccess]);
 
+  const renameSheet = useCallback((id: string, newName: string) => {
+    if (!checkAccess()) return;
+    const normalized = normalizeString(newName);
+    if (!normalized) {
+      alert("O nome do projeto não pode estar vazio.");
+      return;
+    }
+    setSheets(prev => prev.map(s => s.id === id ? { ...s, nome: normalized } : s));
+    markAsDirty();
+  }, [markAsDirty, checkAccess]);
+
   const getAllItems = useCallback(() => {
     return sheets.flatMap(s => s.items);
   }, [sheets]);
@@ -174,6 +233,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const updateItemStatus = useCallback((itemId: string, newStatus: ItemStatus) => {
     if (!checkAccess()) return;
     const today = new Date().toISOString().split('T')[0];
+    
+    // Atualiza nos projetos
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
       items: sheet.items.map(item => 
@@ -186,6 +247,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
           : item
       )
     })));
+    
+    // Sincroniza nas solicitações manuais
+    setManualRequests(prev => prev.map(req => 
+        req.id === itemId ? { ...req, status: newStatus, actualArrivalDate: newStatus === 'ENTREGUE' ? (req.actualArrivalDate || today) : undefined } : req
+    ));
+
     markAsDirty();
   }, [markAsDirty, checkAccess]);
 
@@ -214,6 +281,26 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return item;
       })
     })));
+    
+    setManualRequests(prev => prev.map(req => {
+        if (req.id === itemId) {
+            let newStatus = req.status || 'PENDENTE';
+            let arrivalDate = req.actualArrivalDate;
+
+            if (info.hasOwnProperty('invoiceNumber')) {
+              const hasInvoice = info.invoiceNumber && info.invoiceNumber.trim() !== '';
+              newStatus = hasInvoice ? 'ENTREGUE' : (req.orderNumber ? 'COMPRADO' : 'PENDENTE');
+              if (hasInvoice && !arrivalDate) arrivalDate = today;
+            } else if (info.hasOwnProperty('orderNumber')) {
+              if (req.status !== 'ENTREGUE') {
+                newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+              }
+            }
+            return { ...req, ...info, status: newStatus, actualArrivalDate: arrivalDate };
+        }
+        return req;
+    }));
+
     markAsDirty();
   }, [markAsDirty, checkAccess]);
 
@@ -225,6 +312,125 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         itemIds.has(item.id) ? { ...item, ...info } : item
       )
     })));
+    
+    setManualRequests(prev => prev.map(req => 
+        itemIds.has(req.id) ? { ...req, ...info } : req
+    ));
+
+    markAsDirty();
+  }, [markAsDirty, checkAccess]);
+
+  const addManualRequest = useCallback((req: ManualRequest) => {
+    if (!checkAccess()) return;
+    
+    const normalizedProjectName = normalizeString(req.project);
+    if (!normalizedProjectName) return;
+
+    setSheets(prev => {
+        let targetSheet = prev.find(s => normalizeString(s.nome) === normalizedProjectName);
+        let updatedSheets = [...prev];
+
+        if (!targetSheet) {
+            targetSheet = {
+                id: `PRJ-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                nome: normalizedProjectName,
+                items: [],
+                data_upload: new Date().toLocaleDateString('pt-BR')
+            };
+            updatedSheets.push(targetSheet);
+        }
+
+        const newItem: ProcurementItem = {
+            id: req.id,
+            sheetName: 'SOLICITAÇÃO FORA DE LISTA',
+            assembly: '-',
+            partNumber: req.code || '-',
+            description: req.description,
+            quantity: req.quantity,
+            unit: 'UN',
+            type: req.type,
+            supplier: req.supplier || req.brand || '-',
+            status: req.status || 'PENDENTE',
+            orderNumber: req.orderNumber,
+            expectedArrival: req.expectedArrival,
+            invoiceNumber: req.invoiceNumber,
+            actualArrivalDate: req.actualArrivalDate
+        };
+
+        return updatedSheets.map(s => 
+            s.id === targetSheet?.id ? { ...s, items: [newItem, ...s.items] } : s
+        );
+    });
+
+    setManualRequests(prev => [{ ...req, status: 'PENDENTE' }, ...prev]);
+    markAsDirty();
+  }, [markAsDirty, checkAccess]);
+
+  const removeManualRequest = useCallback((id: string) => {
+    if (!checkAccess()) return;
+    
+    setSheets(prev => prev.map(sheet => ({
+        ...sheet,
+        items: sheet.items.filter(item => item.id !== id)
+    })));
+
+    setManualRequests(prev => prev.filter(r => r.id !== id));
+    markAsDirty();
+  }, [markAsDirty, checkAccess]);
+
+  const updateManualRequestInfo = useCallback((id: string, info: any) => {
+    if (!checkAccess()) return;
+    const today = new Date().toISOString().split('T')[0];
+    
+    setManualRequests(prev => prev.map(req => {
+      if (req.id === id) {
+        let newStatus = req.status || 'PENDENTE';
+        let arrivalDate = req.actualArrivalDate;
+
+        if (info.hasOwnProperty('invoiceNumber')) {
+          const hasInvoice = info.invoiceNumber && info.invoiceNumber.trim() !== '';
+          newStatus = hasInvoice ? 'ENTREGUE' : (req.orderNumber ? 'COMPRADO' : 'PENDENTE');
+          if (hasInvoice && !arrivalDate) arrivalDate = today;
+        } else if (info.hasOwnProperty('orderNumber')) {
+          if (req.status !== 'ENTREGUE') {
+            newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+          }
+        } else if (info.hasOwnProperty('status')) {
+          newStatus = info.status;
+          if (newStatus === 'ENTREGUE' && !arrivalDate) arrivalDate = today;
+        }
+        
+        return { ...req, ...info, status: newStatus, actualArrivalDate: arrivalDate };
+      }
+      return req;
+    }));
+
+    setSheets(prev => prev.map(sheet => ({
+        ...sheet,
+        items: sheet.items.map(item => {
+            if (item.id === id) {
+                let newStatus = item.status;
+                let arrivalDate = item.actualArrivalDate;
+                
+                if (info.hasOwnProperty('invoiceNumber')) {
+                    const hasInvoice = info.invoiceNumber && info.invoiceNumber.trim() !== '';
+                    newStatus = hasInvoice ? 'ENTREGUE' : (item.orderNumber ? 'COMPRADO' : 'PENDENTE');
+                    if (hasInvoice && !arrivalDate) arrivalDate = today;
+                } else if (info.hasOwnProperty('orderNumber')) {
+                    if (item.status !== 'ENTREGUE') {
+                        newStatus = (info.orderNumber && info.orderNumber.trim() !== '') ? 'COMPRADO' : 'PENDENTE';
+                    }
+                } else if (info.hasOwnProperty('status')) {
+                    newStatus = info.status;
+                    if (newStatus === 'ENTREGUE' && !arrivalDate) arrivalDate = today;
+                }
+
+                return { ...item, ...info, status: newStatus, actualArrivalDate: arrivalDate };
+            }
+            return item;
+        })
+    })));
+
     markAsDirty();
   }, [markAsDirty, checkAccess]);
 
@@ -234,9 +440,10 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (password === '372812') {
       if (window.confirm("Confirma a exclusão permanente de tudo?")) {
         setSheets([]);
+        setManualRequests([]);
         localStorage.removeItem(STORAGE_KEY);
         isDirtyRef.current = true;
-        saveToSupabase([]);
+        saveToSupabase([], []);
       }
     } else if (password !== null) {
       alert("Senha incorreta. Ação abortada.");
@@ -244,14 +451,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [saveToSupabase, checkAccess]);
 
   const exportAllData = useCallback(() => {
-    // Exportação permitida para VIEW também, para fins de backup
-    const dataStr = JSON.stringify(sheets, null, 2);
+    const dataStr = JSON.stringify({ sheets, manualRequests }, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', `BACKUP_CLOUDBUY_${new Date().getTime()}.json`);
     linkElement.click();
-  }, [sheets]);
+  }, [sheets, manualRequests]);
 
   const importAllData = useCallback((jsonData: string) => {
     if (!checkAccess()) return false;
@@ -259,10 +465,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const parsed = JSON.parse(jsonData);
       if (Array.isArray(parsed)) {
         setSheets(parsed);
-        markAsDirty();
-        return true;
+        setManualRequests([]);
+      } else {
+        setSheets(parsed.sheets || []);
+        setManualRequests(parsed.manualRequests || []);
       }
-      return false;
+      markAsDirty();
+      return true;
     } catch (e) {
       return false;
     }
@@ -271,12 +480,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const forceSync = useCallback(() => {
     if (!checkAccess()) return;
     markAsDirty();
-    saveToSupabase(sheets);
-  }, [sheets, saveToSupabase, markAsDirty, checkAccess]);
+    saveToSupabase(sheets, manualRequests);
+  }, [sheets, manualRequests, saveToSupabase, markAsDirty, checkAccess]);
 
   return (
     <ProcurementContext.Provider value={{ 
       sheets, 
+      manualRequests,
       activeProjectId, 
       syncStatus,
       lastSyncTime,
@@ -284,12 +494,16 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setAccessLevel,
       addSheet, 
       removeSheet, 
+      renameSheet,
       setActiveProjectId,
       getAllItems, 
       getActiveProjectItems,
       updateItemStatus, 
       updateItemOrderInfo,
       bulkUpdateItems,
+      addManualRequest,
+      removeManualRequest,
+      updateManualRequestInfo,
       clearAllData,
       exportAllData,
       importAllData,
