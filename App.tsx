@@ -45,8 +45,6 @@ import {
   History,
   Timer,
   Trash2,
-  Sparkles,
-  Bot,
   Lock,
   Key,
   LogOut,
@@ -64,7 +62,6 @@ import FileUpload from './components/FileUpload';
 import ManufacturingLineView from './components/ManufacturingLineView';
 import ProjectReportView from './components/ProjectReportView';
 import { CATEGORY_CONFIG, Sheet as SheetType, SheetData, ItemStatus, ProcurementItem, ManualRequest, ItemType } from './types';
-import { getReceivingInsights } from './services/geminiService';
 
 type SortConfig = {
   key: keyof ProcurementItem | 'none';
@@ -147,10 +144,6 @@ const MainContent = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [massDate, setMassDate] = useState('');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'none', direction: 'asc' });
-  
-  const [receivingAiSummary, setReceivingAiSummary] = useState<string>('Analisando logística...');
-  const [loadingReceivingAi, setLoadingReceivingAi] = useState(false);
-  const [lastAiUpdateTime, setLastAiUpdateTime] = useState<number | null>(null);
 
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -208,6 +201,9 @@ const MainContent = () => {
     } else if (passwordInput === '1234') {
       setAccessLevel('VIEW');
       setLoginError(false);
+    } else if (passwordInput === '102030') {
+      setAccessLevel('REQUESTER');
+      setLoginError(false);
     } else {
       loginErrorFeedback();
     }
@@ -219,7 +215,7 @@ const MainContent = () => {
   };
 
   const startEditingProjectName = (sheet: SheetType) => {
-    if (accessLevel === 'VIEW') return;
+    if (accessLevel === 'VIEW' || accessLevel === 'REQUESTER') return;
     setEditingProjectId(sheet.id);
     setTempProjectName(sheet.nome);
   };
@@ -249,62 +245,6 @@ const MainContent = () => {
     const cat = getItemCategory(item);
     return cat !== null && cat !== 'FABRICADOS';
   }, [getItemCategory]);
-
-  useEffect(() => {
-    const fetchReceivingAi = async () => {
-      if (homeSubView !== 'receiving' || sheets.length === 0 || !accessLevel) return;
-
-      const allItems = sheets.flatMap(s => s.items).filter(i => isItemInAnyCard(i));
-      const relevantItems = allItems.filter(i => i.status === 'COMPRADO');
-      const delayed = relevantItems.filter(i => i.expectedArrival && i.expectedArrival < today);
-      const next7Days = relevantItems.filter(i => i.expectedArrival && i.expectedArrival >= today && i.expectedArrival <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-      
-      const dataFingerprint = `${relevantItems.length}-${delayed.length}-${next7Days.length}-${allItems.filter(i => i.status === 'ENTREGUE').length}`;
-
-      const CACHE_KEY = 'receiving_ai_cache_v1';
-      const cached = localStorage.getItem(CACHE_KEY);
-
-      if (cached) {
-        try {
-          const { response, timestamp, fingerprint } = JSON.parse(cached);
-          const now = Date.now();
-          const isExpired = now - timestamp > 3600000; 
-          const hasChanged = fingerprint !== dataFingerprint;
-
-          if (!isExpired) {
-            setReceivingAiSummary(response);
-            setLastAiUpdateTime(timestamp);
-            return;
-          }
-
-          if (isExpired && !hasChanged) {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ response, timestamp: now, fingerprint: dataFingerprint }));
-            setReceivingAiSummary(response);
-            setLastAiUpdateTime(now);
-            return;
-          }
-        } catch (e) {
-          console.error("Erro ao ler cache da IA:", e);
-        }
-      }
-
-      setLoadingReceivingAi(true);
-      const summary = await getReceivingInsights(allItems);
-      const updateTime = Date.now();
-      
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        response: summary,
-        timestamp: updateTime,
-        fingerprint: dataFingerprint
-      }));
-
-      setReceivingAiSummary(summary);
-      setLastAiUpdateTime(updateTime);
-      setLoadingReceivingAi(false);
-    };
-
-    fetchReceivingAi();
-  }, [homeSubView, sheets, isItemInAnyCard, today, accessLevel]);
 
   const globalMetrics = useMemo(() => {
     const allItems = sheets.flatMap(s => s.items.filter(i => isItemInAnyCard(i)));
@@ -567,37 +507,13 @@ const MainContent = () => {
   };
 
   const refreshVisibleItems = useCallback((status: ItemStatus | 'ALL' | 'NAO_COMPRADO' | 'ATRASADO', category: string, projectId: string | null) => {
+    const currentItems = projectId ? sheets.find(s => s.id === projectId)?.items || [] : sheets.flatMap(s => s.items);
     let baseItems;
     
-    if (category === 'MANUAL') {
-        const activeProjName = sheets.find(s => s.id === projectId)?.nome;
-        const projectSpecificManual = (projectId && activeProjName)
-            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjName))
-            : manualRequests;
-
-        baseItems = projectSpecificManual.map(req => ({
-            id: req.id,
-            sheetName: 'SOLICITAÇÃO FORA DE LISTA',
-            assembly: '-',
-            partNumber: req.code,
-            description: req.description,
-            quantity: req.quantity,
-            unit: 'UN',
-            type: req.type,
-            supplier: req.supplier || req.brand,
-            status: req.status || 'PENDENTE',
-            orderNumber: req.orderNumber,
-            expectedArrival: req.expectedArrival,
-            invoiceNumber: req.invoiceNumber,
-            actualArrivalDate: req.actualArrivalDate
-        } as ProcurementItem));
+    if (category === 'All') {
+      baseItems = currentItems.filter(i => isItemInAnyCard(i));
     } else {
-        const currentItems = projectId ? sheets.find(s => s.id === projectId)?.items || [] : sheets.flatMap(s => s.items);
-        if (category === 'All') {
-          baseItems = currentItems.filter(i => isItemInAnyCard(i));
-        } else {
-          baseItems = currentItems.filter(i => getItemCategory(i) === category);
-        }
+      baseItems = currentItems.filter(i => getItemCategory(i) === category);
     }
 
     let filtered;
@@ -612,7 +528,7 @@ const MainContent = () => {
     }
     
     setVisibleItemIds(new Set(filtered.map(i => i.id)));
-  }, [sheets, manualRequests, isItemInAnyCard, getItemCategory, today, activeProjectId]);
+  }, [sheets, manualRequests, isItemInAnyCard, getItemCategory, today]);
 
   useEffect(() => {
     if (itemFilterStatus !== 'ALL' || activeSheet !== 'All' || search) {
@@ -660,20 +576,6 @@ const MainContent = () => {
         return;
       }
 
-      if (key === 'MANUAL') {
-        const activeProjName = sheets.find(s => s.id === activeProjectId)?.nome;
-        const relevantManualReqs = activeProjectId 
-            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjName))
-            : manualRequests;
-            
-        const rows = relevantManualReqs.length;
-        const totalQty = relevantManualReqs.reduce((acc, curr) => acc + (curr.quantity || 0), 0);
-        const totalComprados = relevantManualReqs.filter(i => i.status === 'COMPRADO' || i.status === 'ENTREGUE').length;
-        const progress = rows > 0 ? Math.round((totalComprados / rows) * 100) : 100;
-        stats[key] = { rows, totalQty, missingToBuy: relevantManualReqs.filter(i => i.status === 'PENDENTE').length, isCompleted: progress === 100, purchasedProgress: progress };
-        return;
-      }
-
       if (key === 'FABRICADOS') {
         let pairedRowsCount = 0;
         let totalSubProcesses = 0;
@@ -716,40 +618,16 @@ const MainContent = () => {
       stats[key] = { rows, totalQty, missingToBuy: items.filter(i => i.status === 'PENDENTE').length, isCompleted, purchasedProgress };
     });
     return stats;
-  }, [sheets, projectItems, allGlobalItems, manualRequests, activeProjectId, activeProjectName, isItemInAnyCard, getItemCategory]);
+  }, [projectItems, allGlobalItems, manualRequests, activeProjectId, activeProjectName, isItemInAnyCard, getItemCategory]);
 
   const filteredItems = useMemo(() => {
+    const itemsToFilter = activeProjectId ? projectItems : allGlobalItems;
     let baseItems = [];
 
-    if (activeSheet === 'MANUAL') {
-        const activeProjName = sheets.find(s => s.id === activeProjectId)?.nome;
-        const relevantManualReqs = activeProjectId 
-            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjName))
-            : manualRequests;
-
-        baseItems = relevantManualReqs.map(req => ({
-            id: req.id,
-            sheetName: 'SOLICITAÇÃO FORA DE LISTA',
-            assembly: '-',
-            partNumber: req.code,
-            description: req.description,
-            quantity: req.quantity,
-            unit: 'UN',
-            type: req.type,
-            supplier: req.supplier || req.brand,
-            status: req.status || 'PENDENTE',
-            orderNumber: req.orderNumber,
-            expectedArrival: req.expectedArrival,
-            invoiceNumber: req.invoiceNumber,
-            actualArrivalDate: req.actualArrivalDate
-        } as ProcurementItem));
+    if (activeSheet === 'All') {
+      baseItems = itemsToFilter.filter(i => isItemInAnyCard(i));
     } else {
-        const itemsToFilter = activeProjectId ? projectItems : allGlobalItems;
-        if (activeSheet === 'All') {
-          baseItems = itemsToFilter.filter(i => isItemInAnyCard(i));
-        } else {
-          baseItems = itemsToFilter.filter(i => getItemCategory(i) === activeSheet);
-        }
+      baseItems = itemsToFilter.filter(i => getItemCategory(i) === activeSheet);
     }
 
     if (visibleItemIds) baseItems = baseItems.filter(i => visibleItemIds.has(i.id));
@@ -771,7 +649,7 @@ const MainContent = () => {
       });
     }
     return baseItems;
-  }, [sheets, projectItems, allGlobalItems, manualRequests, activeSheet, search, visibleItemIds, sortConfig, activeProjectId, activeProjectName, isItemInAnyCard, getItemCategory]);
+  }, [projectItems, allGlobalItems, manualRequests, activeSheet, search, visibleItemIds, sortConfig, activeProjectId, activeProjectName, isItemInAnyCard, getItemCategory]);
 
   const handleDataLoaded = (data: SheetData) => {
     const newSheetId = `PRJ-${Date.now()}`;
@@ -857,9 +735,8 @@ const MainContent = () => {
     
     let itemsToExport;
     if (activeSheet === 'MANUAL') {
-        const activeProjName = sheets.find(s => s.id === activeProjectId)?.nome;
         const relevantManualReqs = activeProjectId 
-            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjName))
+            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjectName))
             : manualRequests;
 
         itemsToExport = relevantManualReqs
@@ -915,8 +792,8 @@ const MainContent = () => {
 
   const handleDeleteProjectClick = (e: React.MouseEvent, id: string, name: string) => {
     e.stopPropagation();
-    if (accessLevel === 'VIEW') {
-      alert('Acesso Negado: Somente usuários com permissão TOTAL podem excluir projetos.');
+    if (accessLevel === 'VIEW' || accessLevel === 'REQUESTER') {
+      alert(`Acesso Negado: Seu nível de acesso (${accessLevel}) não permite excluir projetos.`);
       return;
     }
     setDeleteConfirmProject({ id, name });
@@ -1101,23 +978,27 @@ const MainContent = () => {
                         <h1 className="text-4xl font-black text-[var(--text-primary)] tracking-tight uppercase">MEUS PROJETOS</h1>
                         <p className="text-[var(--text-secondary)] font-bold uppercase text-xs mt-1">Sincronização em tempo real com a nuvem</p>
                       </div>
-                      <button 
-                        onClick={() => setIsRequestModalOpen(true)}
-                        className="flex items-center space-x-3 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-500/20 uppercase text-[10px] tracking-widest w-fit"
-                      >
-                        <Send className="w-4 h-4 text-emerald-600" />
-                        <span>SOLICITAÇÃO DE COMPRA</span>
-                      </button>
+                        <button 
+                          onClick={() => setIsRequestModalOpen(true)}
+                          className="flex items-center space-x-3 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-500/20 uppercase text-[10px] tracking-widest w-fit"
+                        >
+                          <Send className="w-4 h-4 text-white" />
+                          <span>SOLICITAÇÃO DE COMPRA ({manualRequests.length})</span>
+                        </button>
                     </div>
 
                     <div className="flex items-center gap-4">
-                      <button onClick={handleExportWithPassword} title="Exportar Backup" className="p-3 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl text-emerald-500 hover:bg-[var(--bg-inner)] transition-all shadow-sm"><CloudDownload className="w-5 h-5" /></button>
-                      <button onClick={handleImportClickWithPassword} title="Importar Backup" className="p-3 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl text-emerald-500 hover:bg-[var(--bg-inner)] transition-all shadow-sm"><CloudUpload className="w-5 h-5" /></button>
+                      {accessLevel !== 'REQUESTER' && (
+                        <>
+                          <button onClick={handleExportWithPassword} title="Exportar Backup" className="p-3 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl text-emerald-500 hover:bg-[var(--bg-inner)] transition-all shadow-sm"><CloudDownload className="w-5 h-5" /></button>
+                          <button onClick={handleImportClickWithPassword} title="Importar Backup" className="p-3 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl text-emerald-500 hover:bg-[var(--bg-inner)] transition-all shadow-sm"><CloudUpload className="w-5 h-5" /></button>
 
-                      <button onClick={() => setView('upload')} className="flex items-center space-x-2 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black hover:bg-emerald-700 transition-all shadow-2xl shadow-emerald-500/20 uppercase text-xs">
-                        <Plus className="w-5 h-5" />
-                        <span>NOVO PROJETO</span>
-                      </button>
+                          <button onClick={() => setView('upload')} className="flex items-center space-x-2 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black hover:bg-emerald-700 transition-all shadow-2xl shadow-emerald-500/20 uppercase text-xs">
+                            <Plus className="w-5 h-5" />
+                            <span>NOVO PROJETO</span>
+                          </button>
+                        </>
+                      )}
 
                       <button 
                         onClick={() => handleGlobalStatusFilter('NAO_COMPRADO')}
@@ -1159,18 +1040,20 @@ const MainContent = () => {
                               </div>
                             ) : (
                               manualRequests.map(req => (
-                                <div key={req.id} className="flex items-center gap-2 p-2.5 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl hover:border-emerald-500/30 transition-all text-[9px] font-bold uppercase truncate group relative">
+                                <div key={req.id} className={`flex items-center gap-2 p-2.5 border border-[var(--border-color)] rounded-xl hover:border-emerald-500/30 transition-all text-[9px] font-bold uppercase group relative ${req.status === 'COMPRADO' ? 'bg-emerald-500/10 border-emerald-500/20' : req.status === 'ENTREGUE' ? 'bg-emerald-500/5 opacity-60' : 'bg-orange-500/10 border-orange-500/20'}`}>
                                   <span className="text-emerald-500 shrink-0">{req.project}</span>
                                   <span className="text-[var(--text-secondary)] shrink-0">|</span>
                                   <span className="text-[var(--text-primary)] truncate flex-1">{req.description}</span>
                                   <span className="text-[var(--text-secondary)] shrink-0">|</span>
                                   <span className="text-[var(--text-secondary)] shrink-0">{req.quantity} UN</span>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); removeManualRequest(req.id); }}
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-[var(--text-secondary)] hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--bg-card)] rounded-md"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
+                                  {accessLevel !== 'REQUESTER' && (
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); removeManualRequest(req.id); }}
+                                      className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-[var(--text-secondary)] hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--bg-card)] rounded-md"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  )}
                                 </div>
                               ))
                             )}
@@ -1179,15 +1062,15 @@ const MainContent = () => {
                     </aside>
 
                     <div className="flex-1">
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-10 print:hidden pb-10">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 print:hidden pb-10">
                         {sheets.map(sheet => {
                           const m = getProjectCardMetrics(sheet);
                           const isEditing = editingProjectId === sheet.id;
                           return (
-                            <motion.div key={sheet.id} whileHover={{ y: -10 }} className="bg-[var(--bg-card)] p-8 rounded-[3rem] border border-[var(--border-color)] shadow-xl cursor-pointer group flex flex-col h-full relative overflow-hidden" onClick={() => { setActiveProjectId(sheet.id); setView('dashboard'); }}>
-                              <div className="flex justify-between items-start mb-8">
-                                <div className="p-5 bg-emerald-500/10 text-emerald-500 rounded-2xl group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-sm"><FileSpreadsheet className="w-8 h-8" /></div>
-                                <button onClick={(e) => handleDeleteProjectClick(e, sheet.id, sheet.nome)} className="p-2 text-[var(--text-secondary)] hover:text-rose-500 rounded-xl transition-colors"><X className="w-6 h-6" /></button>
+                            <motion.div key={sheet.id} whileHover={{ y: -5 }} className="bg-[var(--bg-card)] p-5 rounded-3xl border border-[var(--border-color)] shadow-xl cursor-pointer group flex flex-col h-full relative overflow-hidden" onClick={() => { setActiveProjectId(sheet.id); setView('dashboard'); }}>
+                              <div className="flex justify-between items-start mb-4">
+                                <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-sm"><FileSpreadsheet className="w-5 h-5" /></div>
+                                <button onClick={(e) => handleDeleteProjectClick(e, sheet.id, sheet.nome)} className="p-1.5 text-[var(--text-secondary)] hover:text-rose-500 rounded-lg transition-colors"><X className="w-4 h-4" /></button>
                               </div>
                               
                               {isEditing ? (
@@ -1195,7 +1078,7 @@ const MainContent = () => {
                                   <input
                                     autoFocus
                                     type="text"
-                                    className="bg-[var(--bg-inner)] border border-emerald-500 text-[var(--text-primary)] text-2xl font-black uppercase rounded-xl px-4 py-1 w-full outline-none"
+                                    className="bg-[var(--bg-inner)] border border-emerald-500 text-[var(--text-primary)] text-lg font-black uppercase rounded-xl px-3 py-1 w-full outline-none"
                                     value={tempProjectName}
                                     onChange={(e) => setTempProjectName(e.target.value)}
                                     onKeyDown={(e) => {
@@ -1207,9 +1090,9 @@ const MainContent = () => {
                                   <button onClick={() => setEditingProjectId(null)} className="p-2 bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-inner)] transition-colors"><X className="w-4 h-4" /></button>
                                 </div>
                               ) : (
-                                <div className="flex items-center justify-between group/title mb-1">
+                                <div className="flex items-center justify-between group/title mb-0.5">
                                   <h3 
-                                    className="text-2xl font-black text-[var(--text-primary)] uppercase truncate tracking-tight flex-1"
+                                    className="text-lg font-black text-[var(--text-primary)] uppercase truncate tracking-tight flex-1"
                                     onDoubleClick={(e) => { e.stopPropagation(); startEditingProjectName(sheet); }}
                                   >
                                     {sheet.nome}
@@ -1223,39 +1106,39 @@ const MainContent = () => {
                                 </div>
                               )}
 
-                              <p className="text-[10px] text-[var(--text-secondary)] font-black mb-10 uppercase tracking-widest">CRIADO EM {sheet.data_upload}</p>
-                              <div className="space-y-4 mt-auto">
+                              <p className="text-[9px] text-[var(--text-secondary)] font-black mb-4 uppercase tracking-widest">CRIADO EM {sheet.data_upload}</p>
+                              <div className="space-y-2.5 mt-auto">
                                 <div>
-                                  <div className="flex justify-between items-end mb-1">
-                                    <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1.5"><ShoppingCart className="w-3 h-3 text-emerald-500" /> EVOLUÇÃO DE PEDIDOS COLOCADOS</span>
-                                    <span className="text-[10px] font-black text-emerald-500">{m.placedOrdersProgress}%</span>
+                                  <div className="flex justify-between items-end mb-0.5">
+                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><ShoppingCart className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE PEDIDOS COLOCADOS</span>
+                                    <span className="text-[9px] font-black text-emerald-500">{m.placedOrdersProgress}%</span>
                                   </div>
-                                  <div className="w-full h-2 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
                                     <motion.div initial={{ width: 0 }} animate={{ width: `${m.placedOrdersProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="flex justify-between items-end mb-1">
-                                    <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1.5"><Truck className="w-3 h-3 text-emerald-500" /> EVOLUÇÃO DE ENTREGAS</span>
-                                    <span className="text-[10px] font-black text-emerald-500">{m.deliveryProgress}%</span>
+                                  <div className="flex justify-between items-end mb-0.5">
+                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><Truck className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE ENTREGAS</span>
+                                    <span className="text-[9px] font-black text-emerald-500">{m.deliveryProgress}%</span>
                                   </div>
-                                  <div className="w-full h-2 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
                                     <motion.div initial={{ width: 0 }} animate={{ width: `${m.deliveryProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="flex justify-between items-end mb-1">
-                                    <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-rose-500" /> ITENS EM ATRASO</span>
-                                    <span className="text-[10px] font-black text-rose-500">{m.delayed} UN ({m.delayedProgress}%)</span>
+                                  <div className="flex justify-between items-end mb-0.5">
+                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5 text-rose-500" /> ITENS EM ATRASO</span>
+                                    <span className="text-[9px] font-black text-rose-500">{m.delayed} UN ({m.delayedProgress}%)</span>
                                   </div>
-                                  <div className="w-full h-2 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
                                     <motion.div initial={{ width: 0 }} animate={{ width: `${m.delayedProgress}%` }} className="h-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]" />
                                   </div>
                                 </div>
                               </div>
-                              <div className="mt-8 pt-6 border-t border-[var(--border-color)] flex items-center justify-between">
-                                 <span className="text-[10px] font-black text-[var(--text-secondary)] uppercase">Acessar Projeto</span>
-                                 <ArrowRight className="w-4 h-4 text-emerald-500 group-hover:translate-x-1 transition-transform" />
+                              <div className="mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
+                                 <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase">Acessar Projeto</span>
+                                 <ArrowRight className="w-3.5 h-3.5 text-emerald-500 group-hover:translate-x-1 transition-transform" />
                               </div>
                             </motion.div>
                           );
@@ -1290,56 +1173,6 @@ const MainContent = () => {
                   </div>
 
                   <div className="flex flex-col lg:flex-row gap-8 items-start">
-                    {/* SIDEBAR - LOGISTICS ADVISOR */}
-                    <div className="w-full lg:w-1/4 lg:min-w-[280px] sticky top-28 print:hidden order-first lg:order-none z-20">
-                      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col ring-1 ring-emerald-500/20">
-                        <div className="p-6 bg-[var(--bg-inner)] border-b border-[var(--border-color)] flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-emerald-400" />
-                            <h3 className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-widest">Logistics Advisor</h3>
-                          </div>
-                          {loadingReceivingAi ? (
-                             <RefreshCw className="w-3.5 h-3.5 text-emerald-500 animate-spin" />
-                          ) : (
-                             <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_5px_#10b981]" />
-                          )}
-                        </div>
-                        <div className="p-8">
-                          <div className="flex items-center gap-4 mb-6">
-                            <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 border border-emerald-500/20">
-                              <Bot className="w-7 h-7" />
-                            </div>
-                            <div>
-                               <p className="text-[9px] font-bold text-[var(--text-secondary)] uppercase">Resumo Industrial</p>
-                               <p className="text-xs font-black text-[var(--text-primary)] uppercase">Status da Cadeia</p>
-                               <p className="text-[10px] font-black text-emerald-400 mt-1 uppercase">BOM DIA LISIANE!</p>
-                            </div>
-                          </div>
-                          
-                          <div className="text-[12px] leading-relaxed text-[var(--text-secondary)] space-y-4 font-medium italic">
-                            {receivingAiSummary.split('\n').map((line, idx) => (
-                              <p key={idx} className={line.startsWith('#') || line.startsWith('**') ? 'text-emerald-500 not-italic font-black text-[10px] uppercase mt-4 mb-2' : ''}>
-                                {line.replace(/[*#]/g, '')}
-                              </p>
-                            ))}
-                          </div>
-
-                          <div className="mt-8 pt-6 border-t border-[var(--border-color)] flex items-center justify-between">
-                             <div className="flex items-center gap-2 text-emerald-500/60">
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                                <span className="text-[8px] font-black uppercase">Gemini 3 Pro</span>
-                             </div>
-                             {lastAiUpdateTime && (
-                               <div className="text-[7px] font-black text-[var(--text-secondary)] uppercase flex items-center gap-1">
-                                 <Clock className="w-2.5 h-2.5" />
-                                 Ref: {new Date(lastAiUpdateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                               </div>
-                             )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
                     {/* MAIN CONTENT AREA - TABLES */}
                     <div className="flex-1 w-full min-w-0 space-y-8 z-10">
                       {/* Se houver busca OU o filtro de HOJE estiver ativo, mostramos a tabela consolidada global */}
@@ -1589,7 +1422,7 @@ const MainContent = () => {
                               const projectOfItem = sheets.find(s => s.items.some(it => it.id === item.id));
                               const statusColors = { 
                                 'PENDENTE': 'bg-orange-500/10 border-l-[12px] border-orange-500', 
-                                'COMPRADO': 'bg-indigo-500/10 border-l-[12px] border-indigo-500', 
+                                'COMPRADO': 'bg-emerald-500/10 border-l-[12px] border-emerald-500', 
                                 'ENTREGUE': 'bg-emerald-500/5 border-l-[12px] border-emerald-600 opacity-70 grayscale-[0.2]', 
                                 'ATRASADO': 'bg-rose-500/10 border-l-[12px] border-rose-500' 
                               }; 
@@ -1609,21 +1442,25 @@ const MainContent = () => {
                               return (
                                 <tr key={item.id} className={`hover:brightness-105 transition-all ${isSelected ? 'bg-emerald-500/10 ring-2 ring-inset ring-emerald-600' : (statusColors[displayStatus as keyof typeof statusColors] || statusColors[item.status])}`}>
                                   <td className="px-6 py-5 text-center print:hidden"><button onClick={() => toggleItemSelection(item.id)} className={`w-6 h-6 flex items-center justify-center rounded-lg border-2 transition-all ${isSelected ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-[var(--bg-inner)] border-[var(--border-color)] text-[var(--text-secondary)]'}`}>{isSelected ? (<Check className="w-4 h-4" />) : (<Square className="w-4 h-4" />)}</button></td>
-                                  {(!activeProjectId || activeSheet === 'MANUAL') && <td className="px-6 py-5"><span className="text-[9px] font-black uppercase text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg truncate max-w-[150px] inline-block border border-emerald-500/20">{activeSheet === 'MANUAL' ? item.sheetName : (projectOfItem?.nome || '-')}</span></td>}
+                                  {(!activeProjectId || activeSheet === 'MANUAL') && <td className="px-6 py-5"><span className="text-[9px] font-black uppercase text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg truncate max-w-[150px] inline-block border border-emerald-500/20">{projectOfItem?.nome || '-'}</span></td>}
                                   <td className="px-6 py-5 text-[11px] font-mono font-black text-[var(--text-primary)] whitespace-nowrap">{item.partNumber}</td>
                                   <td className="px-6 py-5 font-black text-sm uppercase text-[var(--text-primary)] truncate max-w-xs">{item.description}</td>
                                   <td className="px-6 py-5 text-center font-black text-[var(--text-primary)]">{item.quantity}</td>
-                                  <td className="px-6 py-5"><input type="text" value={item.supplier || ''} onChange={(e) => handleUpdateInfo(item.id, { supplier: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase text-[var(--text-primary)] print:border-none" /></td>
-                                  <td className="px-6 py-5"><input type="text" value={item.orderNumber || ''} onChange={(e) => handleUpdateInfo(item.id, { orderNumber: e.target.value })} className="w-24 px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase text-[var(--text-primary)] print:border-none" /></td>
-                                  <td className="px-6 py-5"><DateInput value={item.expectedArrival || ''} onChange={(e) => handleUpdateInfo(item.id, { expectedArrival: e.target.value })} className="px-2 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black text-[var(--text-primary)] print:border-none" /></td>
-                                  <td className="px-6 py-5"><select value={item.status} onChange={(e) => handleUpdateStatus(item.id, e.target.value as ItemStatus)} className="w-full px-2 py-2 bg-transparent text-[10px] font-black uppercase outline-none text-[var(--text-primary)] print:appearance-none"><option value="PENDENTE">🟡 PENDENTE</option><option value="COMPRADO">🟢 COMPRADO</option><option value="ENTREGUE">✅ ENTREGUE</option></select></td>
+                                  <td className="px-6 py-5"><input type="text" value={item.supplier || ''} readOnly={accessLevel === 'REQUESTER'} onChange={(e) => handleUpdateInfo(item.id, { supplier: e.target.value })} className="w-full px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase text-[var(--text-primary)] print:border-none" /></td>
+                                  <td className="px-6 py-5"><input type="text" value={item.orderNumber || ''} readOnly={accessLevel === 'REQUESTER'} onChange={(e) => handleUpdateInfo(item.id, { orderNumber: e.target.value })} className="w-24 px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase text-[var(--text-primary)] print:border-none" /></td>
+                                  <td className="px-6 py-5"><DateInput value={item.expectedArrival || ''} readOnly={accessLevel === 'REQUESTER'} onChange={(e) => handleUpdateInfo(item.id, { expectedArrival: e.target.value })} className="px-2 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black text-[var(--text-primary)] print:border-none" /></td>
+                                  <td className="px-6 py-5"><select value={item.status} disabled={accessLevel === 'REQUESTER'} onChange={(e) => handleUpdateStatus(item.id, e.target.value as ItemStatus)} className="w-full px-2 py-2 bg-transparent text-[10px] font-black uppercase outline-none text-[var(--text-primary)] print:appearance-none"><option value="PENDENTE">🟡 PENDENTE</option><option value="COMPRADO">🟢 COMPRADO</option><option value="ENTREGUE">✅ ENTREGUE</option></select></td>
                                   <td className="px-6 py-5 text-center print:hidden">
                                     <div className="flex items-center justify-center gap-2">
-                                      <button onClick={() => handleUpdateStatus(item.id, item.status === 'ENTREGUE' ? 'COMPRADO' : 'ENTREGUE')} className={`p-3 rounded-2xl transition-all ${item.status === 'ENTREGUE' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:border-emerald-600 hover:text-emerald-500'}`}><Check className="w-5 h-5" /></button>
-                                      {activeSheet === 'MANUAL' && (
-                                        <button onClick={() => removeManualRequest(item.id)} className="p-3 bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-rose-600 hover:text-white transition-all rounded-2xl">
-                                          <Trash2 className="w-5 h-5" />
-                                        </button>
+                                      {accessLevel !== 'REQUESTER' && (
+                                        <>
+                                          <button onClick={() => handleUpdateStatus(item.id, item.status === 'ENTREGUE' ? 'COMPRADO' : 'ENTREGUE')} className={`p-3 rounded-2xl transition-all ${item.status === 'ENTREGUE' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:border-emerald-600 hover:text-emerald-500'}`}><Check className="w-5 h-5" /></button>
+                                          {activeSheet === 'MANUAL' && (
+                                            <button onClick={() => removeManualRequest(item.id)} className="p-3 bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-rose-600 hover:text-white transition-all rounded-2xl">
+                                              <Trash2 className="w-5 h-5" />
+                                            </button>
+                                          )}
+                                        </>
                                       )}
                                     </div>
                                   </td>
@@ -1638,7 +1475,7 @@ const MainContent = () => {
               )}
 
               <AnimatePresence>
-                {selectedIds.size > 0 && (
+                {selectedIds.size > 0 && accessLevel !== 'REQUESTER' && (
                   <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center space-x-6 px-10 py-5 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2.5rem] shadow-2xl text-[var(--text-primary)] backdrop-blur-md max-w-[90vw] overflow-x-auto whitespace-nowrap scrollbar-hide print:hidden ring-1 ring-emerald-500/30">
                     <div className="flex items-center space-x-4 pr-6 border-r border-[var(--border-color)]">
                       <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black shadow-lg shadow-emerald-500/20">{selectedIds.size}</div>

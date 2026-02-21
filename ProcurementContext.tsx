@@ -5,7 +5,7 @@ import { supabase } from './lib/supabase';
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
 const SUPABASE_TABLE = 'app_data';
 
-export type AccessLevel = 'TOTAL' | 'VIEW' | null;
+export type AccessLevel = 'TOTAL' | 'VIEW' | 'REQUESTER' | null;
 
 interface ProcurementContextType {
   sheets: Sheet[];
@@ -56,13 +56,13 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   
   const isDirtyRef = useRef(false);
 
-  const checkAccess = useCallback(() => {
-    if (accessLevel === 'VIEW') {
-      alert("ACESSO NEGADO: Seu nível de acesso permite apenas VISUALIZAÇÃO.");
+  const checkAccess = useCallback((allowedLevels: AccessLevel[] = ['TOTAL']) => {
+    if (accessLevel === null) {
+      alert("ACESSO NEGADO: Você precisa estar autenticado.");
       return false;
     }
-    if (accessLevel !== 'TOTAL') {
-      alert("ACESSO NEGADO: Você precisa estar autenticado.");
+    if (!allowedLevels.includes(accessLevel)) {
+      alert(`ACESSO NEGADO: Seu nível de acesso (${accessLevel}) não permite esta ação.`);
       return false;
     }
     return true;
@@ -70,7 +70,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const saveToSupabase = useCallback(async (data: Sheet[], manual: ManualRequest[]) => {
     if (!isInitialLoadComplete || !isDirtyRef.current) return;
-    if (accessLevel !== 'TOTAL') return;
+    if (accessLevel !== 'TOTAL' && accessLevel !== 'REQUESTER') return;
 
     setSyncStatus('saving');
     try {
@@ -191,7 +191,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [sheets, manualRequests, saveToSupabase, isInitialLoadComplete]);
 
   const markAsDirty = useCallback(() => {
-    if (accessLevel !== 'TOTAL') return;
+    if (accessLevel !== 'TOTAL' && accessLevel !== 'REQUESTER') return;
     isDirtyRef.current = true;
     setSyncStatus('pending');
   }, [accessLevel]);
@@ -321,7 +321,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [markAsDirty, checkAccess]);
 
   const addManualRequest = useCallback((req: ManualRequest) => {
-    if (!checkAccess()) return;
+    if (!checkAccess(['TOTAL', 'REQUESTER'])) return;
     
     const normalizedProjectName = normalizeString(req.project);
     if (!normalizedProjectName) return;

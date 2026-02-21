@@ -8,12 +8,11 @@ import {
   CheckCircle2, AlertTriangle, Activity, 
   TrendingUp, Layers, Target, ShieldCheck,
   AlertOctagon, Clock, PackageSearch,
-  Sparkles, Users, Calendar, ArrowUpRight,
+  Users, Calendar, ArrowUpRight,
   TrendingDown, Info, ShieldAlert,
   Database, ListChecks
 } from 'lucide-react';
 import { ProcurementItem, CATEGORY_CONFIG } from '../types';
-import { getProjectStrategicInsights } from '../services/geminiService';
 
 interface ProjectReportViewProps {
   items: ProcurementItem[];
@@ -28,19 +27,7 @@ const COLORS = {
 };
 
 const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectName }) => {
-  const [aiInsights, setAiInsights] = useState<string>('O Diretor de IA está analisando os dados de suprimentos...');
-  const [loadingAi, setLoadingAi] = useState(true);
   const today = new Date().toISOString().split('T')[0];
-
-  useEffect(() => {
-    const fetchInsights = async () => {
-      setLoadingAi(true);
-      const text = await getProjectStrategicInsights(items, projectName);
-      setAiInsights(text || "Sem análise disponível.");
-      setLoadingAi(false);
-    };
-    if (items.length > 0) fetchInsights();
-  }, [projectName, items.length]);
 
   const metrics = useMemo(() => {
     if (!items || items.length === 0) return null;
@@ -150,7 +137,7 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
               <h4 className="text-sm font-black text-amber-500 uppercase mb-1">Atenção: Integridade dos Dados</h4>
               <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed font-medium">
                 Detectamos que <span className="font-bold">{metrics.itemsSemData} itens comprados</span> estão sem data de previsão e <span className="font-bold">{metrics.itemsSemFornecedor} itens</span> estão sem fornecedor. 
-                Isso compromete a precisão da Curva S e da análise de riscos da IA.
+                Isso compromete a precisão da Curva S e da análise de riscos.
               </p>
            </div>
         </motion.div>
@@ -212,28 +199,8 @@ const ProjectReportView: React.FC<ProjectReportViewProps> = ({ items, projectNam
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* IA PROCUREMENT ADVISOR (Gemini 3 Pro) */}
-        <div className="lg:col-span-2 bg-slate-950 dark:bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
-           <div className="p-8 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
-              <h3 className="text-xs font-black text-white uppercase tracking-[0.2em] flex items-center gap-3">
-                 <Sparkles className="w-5 h-5 text-emerald-400 animate-pulse" /> Gemini Strategic Advisor 3.0
-              </h3>
-              {loadingAi && <div className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />}
-           </div>
-           <div className="p-10 flex-1 overflow-y-auto custom-scrollbar bg-slate-950">
-              <div className="text-[13px] leading-relaxed text-slate-300 font-medium space-y-4">
-                {aiInsights.split('\n').map((line, i) => {
-                  if (line.startsWith('#')) return <h4 key={i} className="text-emerald-400 font-black uppercase text-sm mt-8 mb-4 tracking-widest border-b border-emerald-900/50 pb-2">{line.replace(/#/g, '').trim()}</h4>;
-                  if (line.startsWith('-') || line.startsWith('*')) return <li key={i} className="ml-4 mb-2 text-slate-300 list-disc">{line.replace(/^[-*]\s*/, '').trim()}</li>;
-                  return <p key={i} className="mb-2">{line}</p>;
-                })}
-              </div>
-           </div>
-        </div>
-
         {/* GARGALOS POR CATEGORIA */}
-        <div className="bg-[var(--bg-card)] p-8 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col h-[600px]">
+        <div className="lg:col-span-3 bg-[var(--bg-card)] p-8 rounded-[3rem] border border-[var(--border-color)] shadow-sm flex flex-col h-[400px]">
            <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest mb-10 flex items-center gap-2">
               <Layers className="w-5 h-5 text-indigo-600" /> Gargalos por Categoria
            </h3>
