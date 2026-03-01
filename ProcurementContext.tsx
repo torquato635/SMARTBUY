@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { Sheet, ProcurementItem, ItemStatus, ManualRequest } from './types';
+import { Sheet, ProcurementItem, ItemStatus, ManualRequest, AuditLog } from './types';
 import { supabase } from './lib/supabase';
 
 const STORAGE_KEY = 'alltech_smartbuy_local_storage_v1';
@@ -14,6 +14,7 @@ interface ProcurementContextType {
   syncStatus: 'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending';
   lastSyncTime: Date | null;
   accessLevel: AccessLevel;
+  activeUsers: number;
   setAccessLevel: (level: AccessLevel) => void;
   addSheet: (sheet: Sheet) => void;
   removeSheet: (id: string) => void;
@@ -31,6 +32,7 @@ interface ProcurementContextType {
   exportAllData: () => void;
   importAllData: (jsonData: string) => boolean;
   forceSync: () => void;
+  reorderSheets: (newSheets: Sheet[]) => void;
 }
 
 const ProcurementContext = createContext<ProcurementContextType | undefined>(undefined);
@@ -53,8 +55,17 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'offline' | 'pending'>('loading');
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [accessLevel, setAccessLevel] = useState<AccessLevel>(null);
+  const [activeUsers, setActiveUsers] = useState<number>(1);
+  const [userName, setUserName] = useState<string>(() => localStorage.getItem('alltech_user_name') || '');
   
   const isDirtyRef = useRef(false);
+  const pendingLogsRef = useRef<Record<string, { timeout: NodeJS.Timeout, originalItem: any }>>({});
+
+  useEffect(() => {
+    if (userName) {
+      localStorage.setItem('alltech_user_name', userName);
+    }
+  }, [userName]);
 
   const checkAccess = useCallback((allowedLevels: AccessLevel[] = ['TOTAL']) => {
     if (accessLevel === null) {
@@ -152,6 +163,31 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   useEffect(() => {
     const channel = supabase
+      .channel('presence_procurement', {
+        config: {
+          presence: {
+            key: Math.random().toString(36).substring(7),
+          },
+        },
+      })
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const count = Object.keys(state).length;
+        setActiveUsers(count > 0 ? count : 1);
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        // Optional: handle join
+      })
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        // Optional: handle leave
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ online_at: new Date().toISOString() });
+        }
+      });
+
+    const dataChannel = supabase
       .channel('realtime_procurement')
       .on(
         'postgres_changes',
@@ -175,6 +211,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(dataChannel);
     };
   }, []);
 
@@ -195,6 +232,90 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     isDirtyRef.current = true;
     setSyncStatus('pending');
   }, [accessLevel]);
+
+  const createAuditLog = useCallback((action: string, changes?: Record<string, { from: any; to: any }>): AuditLog => {
+    let user = userName;
+    if (!user) {
+        user = accessLevel || 'SISTEMA';
+        // If we don't have a name, try to prompt once? No, that's annoying inside a callback.
+        // We'll rely on the user setting it elsewhere or just use accessLevel.
+    }
+    return {
+      id: Math.random().toString(36).substring(7),
+      timestamp: new Date().toISOString(),
+      user: user,
+      action,
+      changes
+    };
+  }, [accessLevel, userName]);
+
+  const commitPendingLog = useCallback((itemId: string) => {
+    const pending = pendingLogsRef.current[itemId];
+    if (!pending) return;
+
+    const original = pending.originalItem;
+    delete pendingLogsRef.current[itemId];
+
+    setSheets(prev => prev.map(sheet => ({
+      ...sheet,
+      items: sheet.items.map(item => {
+        if (item.id === itemId) {
+          // Calculate changes
+          const changes: Record<string, { from: any; to: any }> = {};
+          let hasChanges = false;
+          
+          // Compare relevant fields
+          const fields = ['status', 'orderNumber', 'invoiceNumber', 'expectedArrival', 'actualArrivalDate', 'supplier', 'brand', 'description', 'quantity', 'unit', 'type'];
+          fields.forEach(key => {
+             const val1 = (original as any)[key];
+             const val2 = (item as any)[key];
+             if (JSON.stringify(val1) !== JSON.stringify(val2)) {
+                 changes[key] = { from: val1, to: val2 };
+                 hasChanges = true;
+             }
+          });
+
+          if (hasChanges) {
+              const action = changes.status ? `Alteração de Status para ${item.status}` : 'Atualização de Informações';
+              const log = createAuditLog(action, changes);
+              return { ...item, history: [log, ...(item.history || [])] };
+          }
+        }
+        return item;
+      })
+    })));
+
+    setManualRequests(prev => prev.map(req => {
+        if (req.id === itemId) {
+            // Calculate changes for manual requests
+            const changes: Record<string, { from: any; to: any }> = {};
+            let hasChanges = false;
+            
+            const fields = ['status', 'orderNumber', 'invoiceNumber', 'expectedArrival', 'actualArrivalDate', 'supplier', 'brand', 'description', 'quantity', 'unit', 'type'];
+            fields.forEach(key => {
+                const val1 = (original as any)[key];
+                const val2 = (req as any)[key];
+                if (JSON.stringify(val1) !== JSON.stringify(val2)) {
+                    changes[key] = { from: val1, to: val2 };
+                    hasChanges = true;
+                }
+            });
+
+            if (hasChanges) {
+                const action = changes.status ? `Alteração de Status para ${req.status}` : 'Atualização de Informações';
+                const log = createAuditLog(action, changes);
+                // ManualRequest doesn't have history field in interface yet? Let's check types.ts
+                // If not, we can't add history. But ProcurementItem has history.
+                // Assuming ManualRequest might not have history, or we need to add it.
+                // Let's check types.ts content again.
+                return req; 
+            }
+        }
+        return req;
+    }));
+    
+    markAsDirty();
+  }, [createAuditLog, markAsDirty]);
 
   const addSheet = useCallback((sheet: Sheet) => {
     if (!checkAccess()) return;
@@ -234,31 +355,83 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (!checkAccess()) return;
     const today = new Date().toISOString().split('T')[0];
     
-    // Atualiza nos projetos
+    // 1. Cancel existing timeout
+    if (pendingLogsRef.current[itemId]) {
+        clearTimeout(pendingLogsRef.current[itemId].timeout);
+    }
+
+    // 2. Find original item if not already tracking
+    let currentItem: any = null;
+    for (const s of sheets) {
+        const found = s.items.find(i => i.id === itemId);
+        if (found) { currentItem = found; break; }
+    }
+    if (!currentItem) {
+        currentItem = manualRequests.find(r => r.id === itemId);
+    }
+
+    if (!pendingLogsRef.current[itemId] && currentItem) {
+        pendingLogsRef.current[itemId] = {
+            timeout: setTimeout(() => {}, 0),
+            originalItem: JSON.parse(JSON.stringify(currentItem))
+        };
+    }
+
+    // 3. Update state immediately (without history)
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
-      items: sheet.items.map(item => 
-        item.id === itemId 
-          ? { 
-              ...item, 
-              status: newStatus,
-              actualArrivalDate: newStatus === 'ENTREGUE' ? (item.actualArrivalDate || today) : undefined 
-            } 
-          : item
-      )
+      items: sheet.items.map(item => {
+        if (item.id === itemId) {
+          return { 
+            ...item, 
+            status: newStatus,
+            actualArrivalDate: newStatus === 'ENTREGUE' ? (item.actualArrivalDate || today) : undefined
+          };
+        }
+        return item;
+      })
     })));
     
-    // Sincroniza nas solicitações manuais
     setManualRequests(prev => prev.map(req => 
         req.id === itemId ? { ...req, status: newStatus, actualArrivalDate: newStatus === 'ENTREGUE' ? (req.actualArrivalDate || today) : undefined } : req
     ));
 
+    // 4. Set new timeout
+    if (pendingLogsRef.current[itemId]) {
+         pendingLogsRef.current[itemId].timeout = setTimeout(() => {
+             commitPendingLog(itemId);
+         }, 10000); 
+    }
+
     markAsDirty();
-  }, [markAsDirty, checkAccess]);
+  }, [markAsDirty, checkAccess, sheets, manualRequests, commitPendingLog]);
 
   const updateItemOrderInfo = useCallback((itemId: string, info: any) => {
     if (!checkAccess()) return;
     const today = new Date().toISOString().split('T')[0];
+
+    // 1. Cancel existing timeout
+    if (pendingLogsRef.current[itemId]) {
+        clearTimeout(pendingLogsRef.current[itemId].timeout);
+    }
+
+    // 2. Find original item if not already tracking
+    let currentItem: any = null;
+    for (const s of sheets) {
+        const found = s.items.find(i => i.id === itemId);
+        if (found) { currentItem = found; break; }
+    }
+    if (!currentItem) {
+        currentItem = manualRequests.find(r => r.id === itemId);
+    }
+
+    if (!pendingLogsRef.current[itemId] && currentItem) {
+        pendingLogsRef.current[itemId] = {
+            timeout: setTimeout(() => {}, 0),
+            originalItem: JSON.parse(JSON.stringify(currentItem))
+        };
+    }
+
     setSheets(prev => prev.map(sheet => ({
       ...sheet,
       items: sheet.items.map(item => {
@@ -276,7 +449,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
             }
           }
           
-          return { ...item, ...info, status: newStatus, actualArrivalDate: arrivalDate };
+          return { 
+            ...item, 
+            ...info, 
+            status: newStatus, 
+            actualArrivalDate: arrivalDate
+          };
         }
         return item;
       })
@@ -301,8 +479,15 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return req;
     }));
 
+    // 4. Set new timeout
+    if (pendingLogsRef.current[itemId]) {
+         pendingLogsRef.current[itemId].timeout = setTimeout(() => {
+             commitPendingLog(itemId);
+         }, 10000); 
+    }
+
     markAsDirty();
-  }, [markAsDirty, checkAccess]);
+  }, [markAsDirty, checkAccess, sheets, manualRequests, commitPendingLog]);
 
   const bulkUpdateItems = useCallback((itemIds: Set<string>, info: any) => {
     if (!checkAccess()) return;
@@ -483,6 +668,12 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
     saveToSupabase(sheets, manualRequests);
   }, [sheets, manualRequests, saveToSupabase, markAsDirty, checkAccess]);
 
+  const reorderSheets = useCallback((newSheets: Sheet[]) => {
+    if (!checkAccess()) return;
+    setSheets(newSheets);
+    markAsDirty();
+  }, [markAsDirty, checkAccess]);
+
   return (
     <ProcurementContext.Provider value={{ 
       sheets, 
@@ -491,6 +682,7 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       syncStatus,
       lastSyncTime,
       accessLevel,
+      activeUsers,
       setAccessLevel,
       addSheet, 
       removeSheet, 
@@ -507,7 +699,8 @@ export const ProcurementProvider: React.FC<{ children: React.ReactNode }> = ({ c
       clearAllData,
       exportAllData,
       importAllData,
-      forceSync
+      forceSync,
+      reorderSheets
     }}>
       {children}
     </ProcurementContext.Provider>

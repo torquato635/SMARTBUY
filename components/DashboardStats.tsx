@@ -94,7 +94,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
   }) => (
     <button 
       onClick={onClick}
-      className={`flex flex-col p-5 rounded-3xl border border-[var(--border-color)] transition-all hover:bg-emerald-500/5 hover:scale-[1.02] active:scale-95 text-left group bg-[var(--bg-card)]`}
+      className={`flex flex-col p-5 rounded-3xl border border-[var(--border-color)] transition-all hover:bg-emerald-500/5 hover:scale-[1.02] active:scale-95 text-left group glass-card`}
     >
       <div className="flex items-center justify-between mb-2">
         <div className={`p-2.5 rounded-xl ${colorClass} bg-emerald-500/10 shadow-sm border border-emerald-500/5`}>
@@ -112,11 +112,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div 
           onClick={() => onStatusFilter('ENTREGUE')}
-          className="lg:col-span-1 bg-gradient-to-br from-[#020617] to-[#022c22] dark:from-[#020617] dark:to-[#022c22] p-10 rounded-[3rem] border border-slate-800 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/30 transition-all group"
+          className="lg:col-span-1 glass-card p-10 rounded-[3rem] border border-[var(--border-color)] corporate-shadow flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/30 transition-all group"
         >
-          {/* O gráfico de evolução sempre mantém o fundo escuro industrial para identidade visual da marca Alltech */}
           <div className="absolute top-0 left-0 w-full h-1.5 bg-emerald-500/50" />
-          <p className="text-sm font-black text-emerald-50 uppercase tracking-[0.25em] mb-6 text-center group-hover:text-white transition-colors">
+          <p className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] mb-6 text-center group-hover:text-emerald-500 transition-colors">
             EVOLUÇÃO DE COMPRAS
           </p>
           
@@ -147,7 +146,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
             </ResponsiveContainer>
             <div className="absolute inset-0 flex items-center justify-center pt-8">
               <div className="text-center translate-y-4">
-                <span className="text-8xl font-black text-white tracking-tighter drop-shadow-2xl">
+                <span className="text-8xl font-black text-[var(--text-primary)] tracking-tighter drop-shadow-2xl">
                   {metrics.purchaseEvolution}<span className="text-3xl text-emerald-400 align-top ml-1">%</span>
                 </span>
               </div>
@@ -155,11 +154,11 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ items: propItems, onSta
           </div>
           
           <div className="absolute -bottom-8 -right-8 opacity-[0.05] group-hover:opacity-[0.1] transition-opacity pointer-events-none">
-            <ShoppingCart className="w-32 h-32 text-white rotate-12" />
+            <ShoppingCart className="w-32 h-32 text-[var(--text-primary)] rotate-12" />
           </div>
         </div>
 
-        <div className="lg:col-span-3 bg-[var(--bg-card)] p-10 rounded-[3.5rem] border border-[var(--border-color)] shadow-2xl flex flex-col md:flex-row items-center gap-10">
+        <div className="lg:col-span-3 glass-card p-10 rounded-[3.5rem] border border-[var(--border-color)] corporate-shadow flex flex-col md:flex-row items-center gap-10">
           <div 
             onClick={() => onStatusFilter('ALL')}
             className="flex items-center space-x-8 shrink-0 cursor-pointer group"

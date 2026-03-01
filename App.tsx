@@ -1,6 +1,26 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
+  DndContext, 
+  closestCenter, 
+  KeyboardSensor, 
+  PointerSensor, 
+  useSensor, 
+  useSensors,
+  DragOverlay,
+  defaultDropAnimationSideEffects,
+  DragStartEvent,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { 
   FileSpreadsheet, 
   Search, 
   X,
@@ -44,6 +64,7 @@ import {
   WifiOff,
   History,
   Timer,
+  Users,
   Trash2,
   Lock,
   Key,
@@ -54,13 +75,22 @@ import {
   ClipboardX,
   Sun,
   Moon,
-  CalendarCheck
+  CalendarCheck,
+  Mail
 } from 'lucide-react';
 import { ProcurementProvider, useProcurement } from './ProcurementContext';
+import LoginScreen from './components/LoginScreen';
+import LogisticsTable from './components/LogisticsTable';
+import DateInput from './components/DateInput';
 import DashboardStats from './components/DashboardStats';
+import ManualRequestModal from './components/ManualRequestModal';
 import FileUpload from './components/FileUpload';
+import { normalizeString } from './utils';
 import ManufacturingLineView from './components/ManufacturingLineView';
 import ProjectReportView from './components/ProjectReportView';
+import AnalysesView from './components/AnalysesView';
+import SpotlightSearch from './components/SpotlightSearch';
+import ItemTimeline from './components/ItemTimeline';
 import { CATEGORY_CONFIG, Sheet as SheetType, SheetData, ItemStatus, ProcurementItem, ManualRequest, ItemType } from './types';
 
 type SortConfig = {
@@ -68,41 +98,180 @@ type SortConfig = {
   direction: 'asc' | 'desc';
 };
 
-const normalizeString = (str: string): string => {
-  if (!str) return "";
-  return str
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .trim();
+
+
+
+const ProjectCardContent = ({
+  sheet,
+  metrics,
+  isEditing,
+  tempProjectName,
+  setTempProjectName,
+  handleSaveRename,
+  setEditingProjectId,
+  startEditingProjectName,
+  handleDeleteProjectClick,
+  setActiveProjectId,
+  setView,
+  style,
+  attributes,
+  listeners,
+  setNodeRef,
+  isDragging
+}: any) => {
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`bg-[var(--bg-card)] p-5 rounded-3xl border border-[var(--border-color)] shadow-xl cursor-pointer group flex flex-col h-full relative overflow-hidden ${isDragging ? 'opacity-50' : ''}`}
+      onClick={() => { setActiveProjectId(sheet.id); setView('dashboard'); }}
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-sm"><FileSpreadsheet className="w-5 h-5" /></div>
+        <button onClick={(e) => handleDeleteProjectClick(e, sheet.id, sheet.nome)} className="p-1.5 text-[var(--text-secondary)] hover:text-rose-500 rounded-lg transition-colors"><X className="w-4 h-4" /></button>
+      </div>
+      
+      {isEditing ? (
+        <div className="mb-1 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <input
+            autoFocus
+            type="text"
+            className="bg-[var(--bg-inner)] border border-emerald-500 text-[var(--text-primary)] text-lg font-black uppercase rounded-xl px-3 py-1 w-full outline-none"
+            value={tempProjectName}
+            onChange={(e) => setTempProjectName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSaveRename(sheet.id);
+              if (e.key === 'Escape') setEditingProjectId(null);
+            }}
+          />
+          <button onClick={() => handleSaveRename(sheet.id)} className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition-colors"><Check className="w-4 h-4" /></button>
+          <button onClick={() => setEditingProjectId(null)} className="p-2 bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-inner)] transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between group/title mb-0.5">
+          <h3 
+            className="text-lg font-black text-[var(--text-primary)] uppercase truncate tracking-tight flex-1"
+            onDoubleClick={(e) => { e.stopPropagation(); startEditingProjectName(sheet); }}
+          >
+            {sheet.nome}
+          </h3>
+          <button 
+            onClick={(e) => { e.stopPropagation(); startEditingProjectName(sheet); }}
+            className="opacity-0 group-hover/title:opacity-100 p-2 text-[var(--text-secondary)] hover:text-emerald-500 transition-all"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <p className="text-[9px] text-[var(--text-secondary)] font-black mb-4 uppercase tracking-widest">CRIADO EM {sheet.data_upload}</p>
+      <div className="space-y-2.5 mt-auto">
+        <div>
+          <div className="flex justify-between items-end mb-0.5">
+            <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><ShoppingCart className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE PEDIDOS COLOCADOS</span>
+            <span className="text-[9px] font-black text-emerald-500">{metrics.placedOrdersProgress}%</span>
+          </div>
+          <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${metrics.placedOrdersProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between items-end mb-0.5">
+            <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><Truck className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE ENTREGAS</span>
+            <span className="text-[9px] font-black text-emerald-500">{metrics.deliveryProgress}%</span>
+          </div>
+          <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${metrics.deliveryProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between items-end mb-0.5">
+            <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5 text-rose-500" /> ITENS EM ATRASO</span>
+            <span className="text-[9px] font-black text-rose-500">{metrics.delayed} UN ({metrics.delayedProgress}%)</span>
+          </div>
+          <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${metrics.delayedProgress}%` }} className="h-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]" />
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
+         <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase">Acessar Projeto</span>
+         <ArrowRight className="w-3.5 h-3.5 text-emerald-500 group-hover:translate-x-1 transition-transform" />
+      </div>
+    </div>
+  );
 };
 
-const DateInput = ({ value, onChange, className, readOnly }: { value: string, onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void, className?: string, readOnly?: boolean }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const handleMouseEnter = () => {
-    if (readOnly) return;
-    try {
-      if (inputRef.current && 'showPicker' in HTMLInputElement.prototype) {
-        (inputRef.current as any).showPicker();
-      }
-    } catch (e) {}
+const SortableProjectCard = ({
+  sheet,
+  getProjectCardMetrics,
+  editingProjectId,
+  setEditingProjectId,
+  tempProjectName,
+  setTempProjectName,
+  handleSaveRename,
+  startEditingProjectName,
+  handleDeleteProjectClick,
+  setActiveProjectId,
+  setView
+}: any) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: sheet.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    touchAction: 'none'
   };
 
+  const metrics = getProjectCardMetrics(sheet);
+  const isEditing = editingProjectId === sheet.id;
+
   return (
-    <input
-      ref={inputRef}
-      type="date"
-      value={value}
-      onChange={onChange}
-      onMouseEnter={handleMouseEnter}
-      className={className}
-      readOnly={readOnly}
+    <ProjectCardContent
+      sheet={sheet}
+      metrics={metrics}
+      isEditing={isEditing}
+      tempProjectName={tempProjectName}
+      setTempProjectName={setTempProjectName}
+      handleSaveRename={handleSaveRename}
+      setEditingProjectId={setEditingProjectId}
+      startEditingProjectName={startEditingProjectName}
+      handleDeleteProjectClick={handleDeleteProjectClick}
+      setActiveProjectId={setActiveProjectId}
+      setView={setView}
+      style={style}
+      attributes={attributes}
+      listeners={listeners}
+      setNodeRef={setNodeRef}
+      isDragging={isDragging}
     />
   );
 };
 
 const MainContent = () => {
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   const { 
     sheets, 
     manualRequests,
@@ -124,31 +293,49 @@ const MainContent = () => {
     syncStatus,
     lastSyncTime,
     accessLevel,
-    setAccessLevel
+    activeUsers,
+    setAccessLevel,
+    reorderSheets
   } = useProcurement();
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = sheets.findIndex((item) => item.id === active.id);
+      const newIndex = sheets.findIndex((item) => item.id === over.id);
+      reorderSheets(arrayMove(sheets, oldIndex, newIndex));
+    }
+    setActiveId(null);
+  };
   
   const [activeSheet, setActiveSheet] = useState<string>('All');
   const [search, setSearch] = useState('');
   const [logisticsGlobalSearch, setLogisticsGlobalSearch] = useState('');
   const [isTodayFilterActive, setIsTodayFilterActive] = useState(false);
   const [view, setView] = useState<'projects' | 'dashboard' | 'upload' | 'items' | 'projectReceiving' | 'report'>('projects');
-  const [homeSubView, setHomeSubView] = useState<'projects' | 'receiving'>('projects');
+  const [homeSubView, setHomeSubView] = useState<'projects' | 'receiving' | 'analyses'>('projects');
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [logisticsFilters, setLogisticsFilters] = useState<Record<string, 'RECEBIDO' | 'A_RECEBER' | 'ATRASADO' | 'ALL'>>({});
   
   const [logisticsSnapshots, setLogisticsSnapshots] = useState<Record<string, { filter: string, ids: string[] }>>({});
 
   const [itemFilterStatus, setItemFilterStatus] = useState<ItemStatus | 'ALL' | 'NAO_COMPRADO' | 'ATRASADO'>('ALL');
+  const [manualSidebarFilter, setManualSidebarFilter] = useState<'ALL' | 'PENDENTE' | 'COMPRADO' | 'ENTREGUE'>('ALL');
   const [visibleItemIds, setVisibleItemIds] = useState<Set<string> | null>(null);
   
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [massDate, setMassDate] = useState('');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'none', direction: 'asc' });
-
-  const [passwordInput, setPasswordInput] = useState('');
-  const [loginError, setLoginError] = useState(false);
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+  const [selectedItemForTimeline, setSelectedItemForTimeline] = useState<ProcurementItem | null>(null);
 
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<{id: string, name: string} | null>(null);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<{id: string, description: string} | null>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -158,21 +345,16 @@ const MainContent = () => {
     return (localStorage.getItem('borto-theme') as 'dark' | 'light') || 'dark';
   });
 
-  const [manualForm, setManualForm] = useState({ 
-    project: '', 
-    code: '', 
-    description: '', 
-    quantity: '',
-    brand: '',
-    type: ItemType.COMERCIAL
-  });
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const excelImportRef = useRef<HTMLInputElement>(null);
   
   const activeProjectName = sheets.find(s => s.id === activeProjectId)?.nome || 'TODOS OS PROJETOS';
   const projectItems = getActiveProjectItems();
   const allGlobalItems = getAllItems();
+
+  const filteredManualRequests = useMemo(() => {
+    if (manualSidebarFilter === 'ALL') return manualRequests;
+    return manualRequests.filter(req => req.status === manualSidebarFilter);
+  }, [manualRequests, manualSidebarFilter]);
   
   // Captura data local (YYYY-MM-DD) para evitar erros de fuso horário do UTC
   const today = useMemo(() => {
@@ -192,27 +374,6 @@ const MainContent = () => {
   }, [theme]);
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-
-  const handleLogin = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (passwordInput === '372812') {
-      setAccessLevel('TOTAL');
-      setLoginError(false);
-    } else if (passwordInput === '1234') {
-      setAccessLevel('VIEW');
-      setLoginError(false);
-    } else if (passwordInput === '102030') {
-      setAccessLevel('REQUESTER');
-      setLoginError(false);
-    } else {
-      loginErrorFeedback();
-    }
-  };
-
-  const loginErrorFeedback = () => {
-    setLoginError(true);
-    setTimeout(() => setLoginError(false), 2000);
-  };
 
   const startEditingProjectName = (sheet: SheetType) => {
     if (accessLevel === 'VIEW' || accessLevel === 'REQUESTER') return;
@@ -251,9 +412,10 @@ const MainContent = () => {
     return {
       pendentes: allItems.filter(i => i.status === 'PENDENTE').length,
       comprados: allItems.filter(i => i.status === 'COMPRADO').length,
-      entregues: allItems.filter(i => i.status === 'ENTREGUE').length
+      entregues: allItems.filter(i => i.status === 'ENTREGUE').length,
+      atrasados: allItems.filter(i => i.status === 'COMPRADO' && i.expectedArrival && i.expectedArrival < today).length
     };
-  }, [sheets, isItemInAnyCard]);
+  }, [sheets, isItemInAnyCard, today]);
 
   const getProjectCardMetrics = useCallback((sheet: SheetType) => {
     const items = sheet.items.filter(i => isItemInAnyCard(i));
@@ -328,103 +490,7 @@ const MainContent = () => {
     return { searchResults, projectsWithData };
   }, [sheets, logisticsGlobalSearch, logisticsFilters, logisticsSnapshots, isItemInAnyCard, today, isTodayFilterActive]);
 
-  const handleManualSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualForm.project || !manualForm.code || !manualForm.description || !manualForm.quantity) {
-      alert("Todos os campos básicos são obrigatórios.");
-      return;
-    }
 
-    const newReq: ManualRequest = {
-      id: `REQ-${Date.now()}`,
-      project: normalizeString(manualForm.project),
-      code: normalizeString(manualForm.code),
-      description: normalizeString(manualForm.description),
-      quantity: Number(manualForm.quantity),
-      brand: normalizeString(manualForm.brand),
-      type: manualForm.type,
-      timestamp: new Date().toLocaleDateString('pt-BR'),
-      status: 'PENDENTE'
-    };
-
-    addManualRequest(newReq);
-    setManualForm({ 
-      project: '', 
-      code: '', 
-      description: '', 
-      quantity: '', 
-      brand: '', 
-      type: ItemType.COMERCIAL 
-    });
-    setIsRequestModalOpen(false);
-  };
-
-  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = (window as any).XLSX.read(bstr, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = (window as any).XLSX.utils.sheet_to_json(ws);
-
-        if (data.length === 0) {
-          alert("A planilha está vazia.");
-          return;
-        }
-
-        let importedCount = 0;
-        data.forEach((row: any) => {
-          const findVal = (keys: string[]) => {
-            const key = Object.keys(row).find(k => keys.some(target => k.toLowerCase().trim() === target.toLowerCase()));
-            return key ? row[key] : null;
-          };
-
-          const project = findVal(['PROJETO', 'PROJETO DESTINO']);
-          const typeRaw = findVal(['TIPO', 'CATEGORIA'])?.toString().toUpperCase();
-          const code = findVal(['CÓDIGO', 'CODIGO', 'PN', 'P/N']);
-          const description = findVal(['Descrição', 'Descricao', 'ITEM']);
-          const quantity = Number(findVal(['Qtd', 'Quantidade', 'QTD']));
-          const brand = findVal(['Marca/Fabricante', 'Marca', 'Fabricante', 'MARCA']);
-
-          if (!project || !description || isNaN(quantity)) return;
-
-          let type = ItemType.COMERCIAL;
-          if (typeRaw && typeRaw.includes('FABRICADO')) type = ItemType.FABRICADO;
-
-          const newReq: ManualRequest = {
-            id: `REQ-${Date.now()}-${importedCount}`,
-            project: normalizeString(project.toString()),
-            code: normalizeString(code?.toString() || '-'),
-            description: normalizeString(description.toString()),
-            quantity: quantity,
-            brand: normalizeString(brand?.toString() || '-'),
-            type: type,
-            timestamp: new Date().toLocaleDateString('pt-BR'),
-            status: 'PENDENTE'
-          };
-
-          addManualRequest(newReq);
-          importedCount++;
-        });
-
-        if (importedCount > 0) {
-          alert(`${importedCount} solicitações importadas com sucesso.`);
-          setIsRequestModalOpen(false);
-        } else {
-          alert("Nenhuma linha válida encontrada. Verifique os nomes das colunas: PROJETO, Descrição, Qtd.");
-        }
-      } catch (err) {
-        console.error(err);
-        alert("Erro ao processar a planilha. Verifique o formato do arquivo.");
-      }
-    };
-    reader.readAsBinaryString(file);
-    if (e.target) e.target.value = '';
-  };
 
   const setProjectFilter = (projectId: string, filter: 'RECEBIDO' | 'A_RECEBER' | 'ATRASADO' | 'ALL') => {
     const currentActiveFilter = logisticsFilters[projectId] || 'ALL';
@@ -542,18 +608,36 @@ const MainContent = () => {
 
   const handleStatusFilter = (status: ItemStatus | 'ALL' | 'NAO_COMPRADO' | 'ATRASADO') => {
     setItemFilterStatus(status);
-    setActiveSheet('All');
-    refreshVisibleItems(status, 'All', activeProjectId);
+    refreshVisibleItems(status, activeSheet, activeProjectId);
     setView('items');
   };
 
   const handleCategoryClick = (key: string) => {
     setActiveSheet(key);
     setItemFilterStatus('ALL');
+    setSearch('');
     refreshVisibleItems('ALL', key, activeProjectId);
     setView('items');
     setSelectedIds(new Set());
     setSortConfig({ key: 'none', direction: 'asc' });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setIsSpotlightOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleSpotlightSelect = (item: ProcurementItem, sheetId: string) => {
+    setActiveProjectId(sheetId);
+    setHomeSubView('projects');
+    setView('projects');
+    setSearch(item.description);
   };
 
   const handleGlobalStatusFilter = (status: ItemStatus | 'NAO_COMPRADO' | 'ATRASADO') => {
@@ -679,12 +763,14 @@ const MainContent = () => {
   const exitItemsView = () => {
     setVisibleItemIds(null);
     setItemFilterStatus('ALL');
+    setSearch('');
     setSelectedIds(new Set());
     if (activeSheet === 'MANUAL' && !activeProjectId) {
         setView('projects');
         setActiveSheet('All');
         return;
     }
+    setActiveSheet('All');
     if (activeProjectId) setView('dashboard'); else setView('projects');
   };
 
@@ -767,6 +853,70 @@ const MainContent = () => {
     (window as any).XLSX.writeFile(workbook, `COTACAO_${activeSheet === 'MANUAL' ? 'SOLICITAÇÃO FORA DE LISTA' : activeProjectName}_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`);
   };
 
+  const handleEmailQuotation = () => {
+    if (selectedIds.size === 0) return;
+    
+    let itemsToExport;
+    if (activeSheet === 'MANUAL') {
+        const relevantManualReqs = activeProjectId 
+            ? manualRequests.filter(req => normalizeString(req.project) === normalizeString(activeProjectName))
+            : manualRequests;
+
+        itemsToExport = relevantManualReqs
+            .filter(i => selectedIds.has(i.id))
+            .map(i => ({
+                project: i.project,
+                code: i.code,
+                description: i.description,
+                quantity: i.quantity
+            }));
+    } else {
+        itemsToExport = (activeProjectId ? projectItems : allGlobalItems)
+          .filter(i => selectedIds.has(i.id))
+          .map(i => {
+            const projectOfItem = sheets.find(s => s.items.some(it => it.id === i.id));
+            return {
+              project: projectOfItem?.nome || '-',
+              code: i.partNumber,
+              description: i.description,
+              quantity: i.quantity
+            };
+          });
+    }
+
+    const subject = `Solicitação de Cotação - ${itemsToExport.length} Itens`;
+    let body = "Solicito cotação para os seguintes itens:\n\n";
+    body += "PROJETO | CÓDIGO | DESCRIÇÃO | QUANTIDADE\n";
+    body += "--------------------------------------------------\n";
+    
+    itemsToExport.forEach(item => {
+        body += `${item.project} | ${item.code} | ${item.description} | ${item.quantity}\n`;
+    });
+    
+    body += "\n\nAtenciosamente,";
+
+    // Generate and download Excel file
+    const excelData = itemsToExport.map(i => ({
+        'PROJETO': i.project,
+        'CÓDIGO': i.code,
+        'DESCRIÇÃO': i.description,
+        'QUANTIDADE': i.quantity
+    }));
+    const worksheet = (window as any).XLSX.utils.json_to_sheet(excelData);
+    const workbook = (window as any).XLSX.utils.book_new();
+    (window as any).XLSX.utils.book_append_sheet(workbook, worksheet, "Cotacao");
+    (window as any).XLSX.writeFile(workbook, `COTACAO_ANEXO_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`);
+
+    // Open mail client
+    const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailtoLink, '_blank');
+
+    // Notify user
+    setTimeout(() => {
+        alert("O arquivo Excel com os itens foi baixado automaticamente.\n\nPor favor, ANEXE-O manualmente ao e-mail que foi aberto.");
+    }, 1000);
+  };
+
   const exportCurrentSituation = () => {
     const itemsToExport = filteredItems.map(i => {
       const projectOfItem = sheets.find(s => s.items.some(it => it.id === i.id));
@@ -811,74 +961,31 @@ const MainContent = () => {
     }
   };
 
+  const handleConfirmDeleteItem = () => {
+    if (!deleteConfirmItem) return;
+    removeManualRequest(deleteConfirmItem.id);
+    setDeleteConfirmItem(null);
+  };
+
   if (!accessLevel) {
-    return (
-      <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center p-4 font-sans">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }} 
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-[var(--bg-card)] border border-[var(--border-color)] p-8 rounded-[2rem] shadow-2xl max-w-sm w-full relative overflow-hidden"
-        >
-          <div className="absolute -right-8 -top-8 opacity-[0.03]">
-            <Lock className="w-32 h-32 text-emerald-500" />
-          </div>
-          
-          <div className="text-center mb-8">
-            <h1 className="text-xl font-black text-[var(--text-primary)] tracking-tighter uppercase leading-none mb-1">
-              BORTO <span className="text-emerald-500">SMARTBUY</span>
-            </h1>
-            <p className="text-[9px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">Acesso Industrial</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Insira seu Token</label>
-              <div className="relative group">
-                <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500/50 group-focus-within:text-emerald-500 transition-colors" />
-                <input 
-                  type="password" 
-                  autoFocus
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="Token de Segurança"
-                  className={`w-full bg-[var(--bg-inner)] border ${loginError ? 'border-rose-500 ring-2 ring-rose-500/10' : 'border-[var(--border-color)] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10'} rounded-xl py-3.5 pl-11 pr-4 text-[var(--text-primary)] font-black outline-none transition-all placeholder:text-[var(--text-secondary)]/30 text-sm`}
-                />
-              </div>
-              <AnimatePresence>
-                {loginError && (
-                  <motion.p initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
-                    <AlertCircle className="w-3 h-3" /> Token Inválido
-                  </motion.p>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <button 
-              type="submit"
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-emerald-500/20 uppercase text-[10px] tracking-widest flex items-center justify-center gap-2"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Acessar</span>
-            </button>
-          </form>
-
-          <div className="mt-6 pt-6 border-t border-[var(--border-color)] flex justify-center gap-4">
-              <div className="flex items-center gap-1.5 opacity-30">
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                 <span className="text-[7px] font-black text-[var(--text-primary)] uppercase">Full</span>
-              </div>
-              <div className="flex items-center gap-1.5 opacity-30">
-                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                 <span className="text-[7px] font-black text-[var(--text-primary)] uppercase">View</span>
-              </div>
-          </div>
-        </motion.div>
-      </div>
-    );
+    return <LoginScreen onLogin={setAccessLevel} />;
   }
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)] pb-12 font-sans flex flex-col transition-colors duration-300">
+      <SpotlightSearch 
+        isOpen={isSpotlightOpen} 
+        onClose={() => setIsSpotlightOpen(false)} 
+        onSelectItem={handleSpotlightSelect}
+      />
+
+      <ItemTimeline 
+        isOpen={!!selectedItemForTimeline}
+        onClose={() => setSelectedItemForTimeline(null)}
+        history={selectedItemForTimeline?.history || []}
+        itemName={selectedItemForTimeline?.description || ''}
+      />
+
       <header className="bg-[var(--bg-card)]/80 backdrop-blur-md border-b border-[var(--border-color)] sticky top-0 z-30 print:hidden shadow-sm">
         <div className="w-full px-6 md:px-10 h-20 flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -943,11 +1050,17 @@ const MainContent = () => {
                   </div>
                 )}
                 <div className="w-px h-3 bg-[var(--border-color)]" />
-                <div className="flex items-center space-x-2 text-emerald-400/70 group-hover:text-emerald-400 transition-colors">
-                   <ShieldCheck className="w-3.5 h-3.5" />
-                   <span className="text-[9px] font-black uppercase tracking-tight">
-                     {accessLevel === 'TOTAL' ? 'ACESSO TOTAL' : 'VIEWER MODE'}
-                   </span>
+                <div className="flex items-center space-x-4">
+                   <div className="flex items-center space-x-2 text-emerald-400/70 group-hover:text-emerald-400 transition-colors">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span className="text-[9px] font-black uppercase tracking-tight">
+                        {accessLevel === 'TOTAL' ? 'ACESSO TOTAL' : accessLevel === 'REQUESTER' ? 'SOLICITANTE' : 'VIEWER MODE'}
+                      </span>
+                   </div>
+                   <div className="flex items-center space-x-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-500" title="Usuários ativos agora">
+                      <Users className="w-2.5 h-2.5" />
+                      <span className="text-[8px] font-black">{activeUsers}</span>
+                   </div>
                 </div>
              </div>
           </div>
@@ -976,14 +1089,13 @@ const MainContent = () => {
                     <div className="flex flex-col gap-6">
                       <div>
                         <h1 className="text-4xl font-black text-[var(--text-primary)] tracking-tight uppercase">MEUS PROJETOS</h1>
-                        <p className="text-[var(--text-secondary)] font-bold uppercase text-xs mt-1">Sincronização em tempo real com a nuvem</p>
                       </div>
                         <button 
                           onClick={() => setIsRequestModalOpen(true)}
                           className="flex items-center space-x-3 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-500/20 uppercase text-[10px] tracking-widest w-fit"
                         >
                           <Send className="w-4 h-4 text-white" />
-                          <span>SOLICITAÇÃO DE COMPRA ({manualRequests.length})</span>
+                          <span>SOLICITAÇÃO DE COMPRA</span>
                         </button>
                     </div>
 
@@ -1008,6 +1120,22 @@ const MainContent = () => {
                         <span>ITENS PENDENTES ({globalMetrics.pendentes})</span>
                       </button>
 
+                      <button 
+                        onClick={() => handleGlobalStatusFilter('ATRASADO')}
+                        className="flex items-center gap-3 px-6 py-4 bg-rose-500 text-white rounded-2xl border border-rose-400 shadow-2xl shadow-rose-500/30 group hover:bg-rose-400 transition-all uppercase text-xs font-black ring-2 ring-rose-500/20"
+                      >
+                        <AlertTriangle className="w-4 h-4 text-white" />
+                        <span>ITENS ATRASADOS ({globalMetrics.atrasados})</span>
+                      </button>
+
+                      <button 
+                        onClick={() => setHomeSubView('analyses')}
+                        className="flex items-center gap-3 px-6 py-4 bg-indigo-600 text-white rounded-2xl border border-indigo-400 shadow-2xl shadow-indigo-500/30 group hover:bg-indigo-400 transition-all uppercase text-xs font-black ring-2 ring-indigo-500/20"
+                      >
+                        <BarChart3 className="w-4 h-4 text-white" />
+                        <span>ANÁLISES</span>
+                      </button>
+
                       <input type="file" id="import-json" ref={fileInputRef} onChange={handleImportFile} className="hidden" accept=".json" />
                     </div>
                   </div>
@@ -1015,31 +1143,59 @@ const MainContent = () => {
                   <div className="flex gap-8 items-start">
                     <aside className="hidden lg:block w-80 shrink-0 print:hidden">
                       <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col h-[calc(100vh-320px)] ring-1 ring-[var(--border-color)]/50">
-                         <div className="p-6 bg-[var(--bg-inner)] border-b border-[var(--border-color)] flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <StickyNote className="w-5 h-5 text-emerald-500" />
-                              <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest">Solicitação Fora de Lista</h3>
+                         <div className="p-6 bg-[var(--bg-inner)] border-b border-[var(--border-color)] flex flex-col gap-4">
+                            <div className="flex items-center justify-between">
+                               <div className="flex items-center gap-3">
+                                 <StickyNote className="w-5 h-5 text-emerald-500" />
+                                 <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest">Solicitação Fora de Lista</h3>
+                               </div>
+                               <button 
+                                 onClick={() => {
+                                     setActiveSheet('MANUAL');
+                                     setView('items');
+                                     setActiveProjectId(null);
+                                 }}
+                                 className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                                 title="Ver Página de Compras"
+                               >
+                                 <Maximize2 className="w-4 h-4" />
+                               </button>
                             </div>
-                            <button 
-                              onClick={() => {
-                                  setActiveSheet('MANUAL');
-                                  setView('items');
-                                  setActiveProjectId(null);
-                              }}
-                              className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                              title="Ver Página de Compras"
-                            >
-                              <Maximize2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                               <button 
+                                 onClick={() => setManualSidebarFilter('ALL')}
+                                 className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border shrink-0 ${manualSidebarFilter === 'ALL' ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg' : 'bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--bg-inner)]'}`}
+                               >
+                                 Todos
+                               </button>
+                               <button 
+                                 onClick={() => setManualSidebarFilter('PENDENTE')}
+                                 className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border shrink-0 ${manualSidebarFilter === 'PENDENTE' ? 'bg-orange-500 text-white border-orange-400 shadow-lg' : 'bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--bg-inner)]'}`}
+                               >
+                                 Pendentes
+                               </button>
+                               <button 
+                                 onClick={() => setManualSidebarFilter('COMPRADO')}
+                                 className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border shrink-0 ${manualSidebarFilter === 'COMPRADO' ? 'bg-emerald-500 text-white border-emerald-400 shadow-lg' : 'bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--bg-inner)]'}`}
+                               >
+                                 Comprado
+                               </button>
+                               <button 
+                                 onClick={() => setManualSidebarFilter('ENTREGUE')}
+                                 className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border shrink-0 ${manualSidebarFilter === 'ENTREGUE' ? 'bg-blue-500 text-white border-blue-400 shadow-lg' : 'bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--bg-inner)]'}`}
+                               >
+                                 Entregue
+                               </button>
+                            </div>
                          </div>
                          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-1.5">
-                            {manualRequests.length === 0 ? (
+                            {filteredManualRequests.length === 0 ? (
                               <div className="flex flex-col items-center justify-center h-full text-[var(--text-secondary)] opacity-50 space-y-4">
                                  <Package className="w-10 h-10" />
-                                 <p className="text-[10px] font-black uppercase text-center">Nenhuma solicitação pendente</p>
+                                 <p className="text-[10px] font-black uppercase text-center">Nenhuma solicitação {manualSidebarFilter !== 'ALL' ? manualSidebarFilter.toLowerCase() : 'pendente'}</p>
                               </div>
                             ) : (
-                              manualRequests.map(req => (
+                              filteredManualRequests.map(req => (
                                 <div key={req.id} className={`flex items-center gap-2 p-2.5 border border-[var(--border-color)] rounded-xl hover:border-emerald-500/30 transition-all text-[9px] font-bold uppercase group relative ${req.status === 'COMPRADO' ? 'bg-emerald-500/10 border-emerald-500/20' : req.status === 'ENTREGUE' ? 'bg-emerald-500/5 opacity-60' : 'bg-orange-500/10 border-orange-500/20'}`}>
                                   <span className="text-emerald-500 shrink-0">{req.project}</span>
                                   <span className="text-[var(--text-secondary)] shrink-0">|</span>
@@ -1048,7 +1204,7 @@ const MainContent = () => {
                                   <span className="text-[var(--text-secondary)] shrink-0">{req.quantity} UN</span>
                                   {accessLevel !== 'REQUESTER' && (
                                     <button 
-                                      onClick={(e) => { e.stopPropagation(); removeManualRequest(req.id); }}
+                                      onClick={(e) => { e.stopPropagation(); setDeleteConfirmItem({ id: req.id, description: req.description }); }}
                                       className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-[var(--text-secondary)] hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--bg-card)] rounded-md"
                                     >
                                       <X className="w-3 h-3" />
@@ -1062,91 +1218,55 @@ const MainContent = () => {
                     </aside>
 
                     <div className="flex-1">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 print:hidden pb-10">
-                        {sheets.map(sheet => {
-                          const m = getProjectCardMetrics(sheet);
-                          const isEditing = editingProjectId === sheet.id;
-                          return (
-                            <motion.div key={sheet.id} whileHover={{ y: -5 }} className="bg-[var(--bg-card)] p-5 rounded-3xl border border-[var(--border-color)] shadow-xl cursor-pointer group flex flex-col h-full relative overflow-hidden" onClick={() => { setActiveProjectId(sheet.id); setView('dashboard'); }}>
-                              <div className="flex justify-between items-start mb-4">
-                                <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300 shadow-sm"><FileSpreadsheet className="w-5 h-5" /></div>
-                                <button onClick={(e) => handleDeleteProjectClick(e, sheet.id, sheet.nome)} className="p-1.5 text-[var(--text-secondary)] hover:text-rose-500 rounded-lg transition-colors"><X className="w-4 h-4" /></button>
-                              </div>
-                              
-                              {isEditing ? (
-                                <div className="mb-1 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    autoFocus
-                                    type="text"
-                                    className="bg-[var(--bg-inner)] border border-emerald-500 text-[var(--text-primary)] text-lg font-black uppercase rounded-xl px-3 py-1 w-full outline-none"
-                                    value={tempProjectName}
-                                    onChange={(e) => setTempProjectName(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleSaveRename(sheet.id);
-                                      if (e.key === 'Escape') setEditingProjectId(null);
-                                    }}
-                                  />
-                                  <button onClick={() => handleSaveRename(sheet.id)} className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition-colors"><Check className="w-4 h-4" /></button>
-                                  <button onClick={() => setEditingProjectId(null)} className="p-2 bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-inner)] transition-colors"><X className="w-4 h-4" /></button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-between group/title mb-0.5">
-                                  <h3 
-                                    className="text-lg font-black text-[var(--text-primary)] uppercase truncate tracking-tight flex-1"
-                                    onDoubleClick={(e) => { e.stopPropagation(); startEditingProjectName(sheet); }}
-                                  >
-                                    {sheet.nome}
-                                  </h3>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); startEditingProjectName(sheet); }}
-                                    className="opacity-0 group-hover/title:opacity-100 p-2 text-[var(--text-secondary)] hover:text-emerald-500 transition-all"
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              )}
-
-                              <p className="text-[9px] text-[var(--text-secondary)] font-black mb-4 uppercase tracking-widest">CRIADO EM {sheet.data_upload}</p>
-                              <div className="space-y-2.5 mt-auto">
-                                <div>
-                                  <div className="flex justify-between items-end mb-0.5">
-                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><ShoppingCart className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE PEDIDOS COLOCADOS</span>
-                                    <span className="text-[9px] font-black text-emerald-500">{m.placedOrdersProgress}%</span>
-                                  </div>
-                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
-                                    <motion.div initial={{ width: 0 }} animate={{ width: `${m.placedOrdersProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between items-end mb-0.5">
-                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><Truck className="w-2.5 h-2.5 text-emerald-500" /> EVOLUÇÃO DE ENTREGAS</span>
-                                    <span className="text-[9px] font-black text-emerald-500">{m.deliveryProgress}%</span>
-                                  </div>
-                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
-                                    <motion.div initial={{ width: 0 }} animate={{ width: `${m.deliveryProgress}%` }} className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between items-end mb-0.5">
-                                    <span className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5 text-rose-500" /> ITENS EM ATRASO</span>
-                                    <span className="text-[9px] font-black text-rose-500">{m.delayed} UN ({m.delayedProgress}%)</span>
-                                  </div>
-                                  <div className="w-full h-1.5 bg-[var(--bg-inner)] rounded-full overflow-hidden border border-[var(--border-color)]">
-                                    <motion.div initial={{ width: 0 }} animate={{ width: `${m.delayedProgress}%` }} className="h-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]" />
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
-                                 <span className="text-[9px] font-black text-[var(--text-secondary)] uppercase">Acessar Projeto</span>
-                                 <ArrowRight className="w-3.5 h-3.5 text-emerald-500 group-hover:translate-x-1 transition-transform" />
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                      </div>
+                      <DndContext 
+                        sensors={sensors} 
+                        collisionDetection={closestCenter} 
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <SortableContext items={sheets.map(s => s.id)} strategy={rectSortingStrategy}>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 print:hidden pb-10">
+                            {sheets.map(sheet => (
+                              <SortableProjectCard
+                                key={sheet.id}
+                                sheet={sheet}
+                                getProjectCardMetrics={getProjectCardMetrics}
+                                editingProjectId={editingProjectId}
+                                setEditingProjectId={setEditingProjectId}
+                                tempProjectName={tempProjectName}
+                                setTempProjectName={setTempProjectName}
+                                handleSaveRename={handleSaveRename}
+                                startEditingProjectName={startEditingProjectName}
+                                handleDeleteProjectClick={handleDeleteProjectClick}
+                                setActiveProjectId={setActiveProjectId}
+                                setView={setView}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                        <DragOverlay>
+                          {activeId ? (
+                            <ProjectCardContent
+                              sheet={sheets.find(s => s.id === activeId)}
+                              metrics={getProjectCardMetrics(sheets.find(s => s.id === activeId)!)}
+                              isEditing={false}
+                              tempProjectName=""
+                              setTempProjectName={() => {}}
+                              handleSaveRename={() => {}}
+                              setEditingProjectId={() => {}}
+                              startEditingProjectName={() => {}}
+                              handleDeleteProjectClick={() => {}}
+                              setActiveProjectId={() => {}}
+                              setView={() => {}}
+                            />
+                          ) : null}
+                        </DragOverlay>
+                      </DndContext>
                     </div>
                   </div>
                 </div>
+              ) : homeSubView === 'analyses' ? (
+                <AnalysesView items={allGlobalItems} onUpdateItem={updateItemOrderInfo} />
               ) : (
                 <div className="space-y-8 animate-fade-in">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden">
@@ -1177,79 +1297,22 @@ const MainContent = () => {
                     <div className="flex-1 w-full min-w-0 space-y-8 z-10">
                       {/* Se houver busca OU o filtro de HOJE estiver ativo, mostramos a tabela consolidada global */}
                       {(logisticsGlobalSearch || isTodayFilterActive) ? (
-                        <div className="bg-[var(--bg-card)] rounded-[2.5rem] border border-[var(--border-color)] shadow-xl overflow-hidden animate-fade-in">
-                           <div className="p-6 bg-[var(--bg-inner)] border-b border-[var(--border-color)] flex items-center justify-between print:hidden">
-                              <h2 className="text-xs font-black uppercase text-[var(--text-secondary)] tracking-widest flex items-center gap-2">
-                                <Search className="w-4 h-4" /> {isTodayFilterActive ? 'ITENS PARA HOJE' : 'RESULTADOS'} {logisticsGlobalSearch ? `: "${logisticsGlobalSearch.toUpperCase()}"` : ''}
-                              </h2>
-                              <span className="text-[10px] font-black bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full uppercase">{logisticsData.searchResults.length} Itens</span>
-                           </div>
-                           <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse min-w-[1100px]">
-                              <thead>
-                                <tr className="bg-[var(--bg-inner)] border-b border-[var(--border-color)] text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
-                                  <th className="px-8 py-4">Projeto</th>
-                                  <th className="px-8 py-4 w-40">Ordem (OC)</th>
-                                  <th className="px-8 py-4">Descrição e Código</th>
-                                  <th className="px-8 py-4 text-center">Qtd</th>
-                                  <th className="px-4 py-4 text-center w-32">Previsão</th>
-                                  <th className="px-4 py-4 w-44">Nota Fiscal (NF)</th>
-                                  <th className="px-4 py-4 w-40">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[var(--border-color)]">
-                                {logisticsData.searchResults.map(item => {
-                                  const isAtrasado = item.expectedArrival && item.expectedArrival < today && item.status !== 'ENTREGUE';
-                                  return (
-                                    <tr key={item.id} className={`hover:bg-[var(--bg-inner)] transition-colors ${item.status === 'ENTREGUE' ? 'bg-emerald-500/5' : ''}`}>
-                                      <td className="px-8 py-4"><span className="text-[10px] font-black uppercase text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">{(item as any).projectName}</span></td>
-                                      <td className="px-8 py-4">
-                                        <input type="text" value={item.orderNumber || ''} readOnly className="w-full px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase outline-none text-[var(--text-secondary)]" />
-                                      </td>
-                                      <td className="px-8 py-4">
-                                         <div className="max-w-md">
-                                           <p className="font-black text-xs uppercase text-[var(--text-primary)] truncate">{item.description}</p>
-                                           <div className="flex items-center gap-2 mt-0.5 whitespace-nowrap">
-                                              <span className="text-[11px] font-mono font-bold text-[var(--text-secondary)]">{item.partNumber}</span>
-                                              <span className="text-[11px] font-bold text-emerald-500 uppercase">| {item.supplier || 'S/ FORNECEDOR'}</span>
-                                           </div>
-                                         </div>
-                                      </td>
-                                      <td className="px-8 py-4 text-center font-black text-[var(--text-secondary)] text-xs">{item.quantity}</td>
-                                      <td className="px-4 py-4 text-center">
-                                         <DateInput value={item.expectedArrival || ''} readOnly className={`px-3 py-2 border rounded-lg text-xs font-black outline-none ${isAtrasado ? 'border-rose-900 bg-rose-500/10 text-rose-500' : 'border-[var(--border-color)] bg-[var(--bg-inner)] text-[var(--text-secondary)]'}`} />
-                                      </td>
-                                      <td className="px-4 py-4">
-                                        <div className="relative group">
-                                          <input type="text" placeholder="Nº DA NOTA..." value={item.invoiceNumber || ''} onChange={(e) => updateItemOrderInfo(item.id, { invoiceNumber: e.target.value })} className="w-full px-4 py-2 bg-[var(--bg-inner)] border-2 border-[var(--border-color)] rounded-xl text-xs font-black uppercase focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all shadow-sm text-[var(--text-primary)]" />
-                                          {item.invoiceNumber && <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />}
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-4">
-                                         {item.status === 'ENTREGUE' ? (
-                                            <span className="px-4 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border border-emerald-500/20 whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5" /> RECEBIDO</span>
-                                         ) : (
-                                            <span className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border whitespace-nowrap ${isAtrasado ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>
-                                              {isAtrasado ? <AlertCircle className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />} {isAtrasado ? 'ATRASADO' : 'A RECEBER'}
-                                            </span>
-                                         )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                           </div>
-                        </div>
+                        <LogisticsTable 
+                          items={logisticsData.searchResults} 
+                          today={today} 
+                          updateItemOrderInfo={updateItemOrderInfo} 
+                          isTodayFilterActive={isTodayFilterActive}
+                          logisticsGlobalSearch={logisticsGlobalSearch}
+                        />
                       ) : (
-                        <div className="space-y-8 animate-fade-in">
+                        <div className="space-y-5 animate-fade-in">
                           {logisticsData.projectsWithData.map((project) => {
                             const currentFilter = logisticsFilters[project.id] || 'ALL';
                             return (
                               <div key={project.id} className="bg-[var(--bg-card)] rounded-[2.5rem] border border-[var(--border-color)] shadow-xl overflow-hidden transition-all">
-                                <div className="p-8 flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-[var(--bg-inner)]/50 print:hidden">
-                                   <div className="flex items-center gap-6">
-                                      <div className="p-4 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-2xl shadow-sm"><Building2 className="w-6 h-6 text-emerald-500" /></div>
+                                <div className="p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-[var(--bg-inner)]/50 print:hidden">
+                                   <div className="flex items-center gap-5">
+                                      <div className="p-3 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-2xl shadow-sm"><Building2 className="w-6 h-6 text-emerald-500" /></div>
                                       <div>
                                         <h3 className="text-2xl font-black text-[var(--text-primary)] uppercase tracking-tight">{project.nome}</h3>
                                         <div className="flex flex-wrap items-center gap-4 mt-1">
@@ -1276,12 +1339,12 @@ const MainContent = () => {
                                       <table className="w-full text-left border-collapse min-w-[1100px]">
                                         <thead>
                                           <tr className="bg-[var(--bg-inner)] border-b border-[var(--border-color)]">
-                                            <th className="px-8 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-40">Ordem (OC)</th>
-                                            <th className="px-8 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">Descrição e Código</th>
-                                            <th className="px-8 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest text-center">Qtd</th>
-                                            <th className="px-4 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest text-center w-32">Previsão</th>
-                                            <th className="px-4 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-44">Nota Fiscal (NF)</th>
-                                            <th className="px-4 py-5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-40">Status</th>
+                                            <th className="px-8 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-40">Ordem (OC)</th>
+                                            <th className="px-8 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">Descrição e Código</th>
+                                            <th className="px-8 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest text-center">Qtd</th>
+                                            <th className="px-4 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest text-center w-32">Previsão</th>
+                                            <th className="px-4 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-44">Nota Fiscal (NF)</th>
+                                            <th className="px-4 py-3 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest w-40">Status</th>
                                           </tr>
                                         </thead>
                                         <tbody className="divide-y divide-[var(--border-color)]">
@@ -1289,8 +1352,8 @@ const MainContent = () => {
                                             const isAtrasado = item.expectedArrival && item.expectedArrival < today && item.status !== 'ENTREGUE';
                                             return (
                                               <tr key={item.id} className={`hover:bg-[var(--bg-inner)] transition-colors ${item.status === 'ENTREGUE' ? 'bg-emerald-500/5' : ''}`}>
-                                                <td className="px-8 py-4"><input type="text" placeholder="Nº OC" value={item.orderNumber || ''} readOnly className="w-full px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase outline-none text-[var(--text-secondary)]" /></td>
-                                                <td className="px-8 py-4">
+                                                <td className="px-8 py-2.5"><input type="text" placeholder="Nº OC" value={item.orderNumber || ''} readOnly className="w-full px-3 py-2 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-lg text-xs font-black uppercase outline-none text-[var(--text-secondary)]" /></td>
+                                                <td className="px-8 py-2.5">
                                                    <div className="max-w-md">
                                                      <p className="font-black text-xs uppercase text-[var(--text-primary)] truncate">{item.description}</p>
                                                      <div className="flex items-center gap-2 mt-0.5 whitespace-nowrap">
@@ -1299,10 +1362,10 @@ const MainContent = () => {
                                                      </div>
                                                    </div>
                                                 </td>
-                                                <td className="px-8 py-4 text-center font-black text-[var(--text-secondary)] text-xs">{item.quantity}</td>
-                                                <td className="px-4 py-4 text-center"><DateInput value={item.expectedArrival || ''} readOnly className={`px-3 py-2 border rounded-lg text-xs font-black outline-none ${isAtrasado ? 'border-rose-900 bg-rose-500/10 text-rose-500' : 'border-[var(--border-color)] bg-[var(--bg-inner)] text-[var(--text-secondary)]'}`} /></td>
-                                                <td className="px-4 py-4"><div className="relative group"><input type="text" placeholder="Nº DA NOTA..." value={item.invoiceNumber || ''} onChange={(e) => updateItemOrderInfo(item.id, { invoiceNumber: e.target.value })} className="w-full px-4 py-2 bg-[var(--bg-inner)] border-2 border-[var(--border-color)] rounded-xl text-xs font-black uppercase focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all shadow-sm text-[var(--text-primary)]" />{item.invoiceNumber && <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />}</div></td>
-                                                <td className="px-4 py-4">{item.status === 'ENTREGUE' ? (<span className="px-4 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border border-emerald-500/20 whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5" /> RECEBIDO</span>) : (<span className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border whitespace-nowrap ${isAtrasado ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>{isAtrasado ? <AlertCircle className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />} {isAtrasado ? 'ATRASADO' : 'A RECEBER'}</span>)}</td>
+                                                <td className="px-8 py-2.5 text-center font-black text-[var(--text-secondary)] text-xs">{item.quantity}</td>
+                                                <td className="px-4 py-2.5 text-center"><DateInput value={item.expectedArrival || ''} readOnly className={`px-3 py-2 border rounded-lg text-xs font-black outline-none ${isAtrasado ? 'border-rose-900 bg-rose-500/10 text-rose-500' : 'border-[var(--border-color)] bg-[var(--bg-inner)] text-[var(--text-secondary)]'}`} /></td>
+                                                <td className="px-4 py-2.5"><div className="relative group"><input type="text" placeholder="Nº DA NOTA..." value={item.invoiceNumber || ''} onChange={(e) => updateItemOrderInfo(item.id, { invoiceNumber: e.target.value })} className="w-full px-4 py-2 bg-[var(--bg-inner)] border-2 border-[var(--border-color)] rounded-xl text-xs font-black uppercase focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all shadow-sm text-[var(--text-primary)]" />{item.invoiceNumber && <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />}</div></td>
+                                                <td className="px-4 py-2.5">{item.status === 'ENTREGUE' ? (<span className="px-4 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border border-emerald-500/20 whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5" /> RECEBIDO</span>) : (<span className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 w-fit border whitespace-nowrap ${isAtrasado ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>{isAtrasado ? <AlertCircle className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />} {isAtrasado ? 'ATRASADO' : 'A RECEBER'}</span>)}</td>
                                               </tr>
                                             );
                                           })}
@@ -1452,11 +1515,14 @@ const MainContent = () => {
                                   <td className="px-6 py-5"><select value={item.status} disabled={accessLevel === 'REQUESTER'} onChange={(e) => handleUpdateStatus(item.id, e.target.value as ItemStatus)} className="w-full px-2 py-2 bg-transparent text-[10px] font-black uppercase outline-none text-[var(--text-primary)] print:appearance-none"><option value="PENDENTE">🟡 PENDENTE</option><option value="COMPRADO">🟢 COMPRADO</option><option value="ENTREGUE">✅ ENTREGUE</option></select></td>
                                   <td className="px-6 py-5 text-center print:hidden">
                                     <div className="flex items-center justify-center gap-2">
+                                      <button onClick={() => setSelectedItemForTimeline(item)} className="p-3 bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:border-indigo-600 hover:text-indigo-500 transition-all rounded-2xl" title="Ver Histórico">
+                                        <History className="w-5 h-5" />
+                                      </button>
                                       {accessLevel !== 'REQUESTER' && (
                                         <>
                                           <button onClick={() => handleUpdateStatus(item.id, item.status === 'ENTREGUE' ? 'COMPRADO' : 'ENTREGUE')} className={`p-3 rounded-2xl transition-all ${item.status === 'ENTREGUE' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:border-emerald-600 hover:text-emerald-500'}`}><Check className="w-5 h-5" /></button>
                                           {activeSheet === 'MANUAL' && (
-                                            <button onClick={() => removeManualRequest(item.id)} className="p-3 bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-rose-600 hover:text-white transition-all rounded-2xl">
+                                            <button onClick={() => setDeleteConfirmItem({ id: item.id, description: item.description })} className="p-3 bg-[var(--bg-inner)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-rose-600 hover:text-white transition-all rounded-2xl">
                                               <Trash2 className="w-5 h-5" />
                                             </button>
                                           )}
@@ -1500,6 +1566,10 @@ const MainContent = () => {
                       <span>SOLICITAR COTAÇÃO</span>
                     </button>
 
+                    <button onClick={handleEmailQuotation} className="flex items-center justify-center w-10 h-10 bg-emerald-600 text-white rounded-xl font-black hover:bg-emerald-700 transition-all shadow-xl shadow-black/10 uppercase" title="Enviar Cotação por E-mail">
+                      <Mail className="w-4 h-4" />
+                    </button>
+
                     <button onClick={() => setSelectedIds(new Set())} className="flex items-center space-x-3 px-6 py-3 bg-[var(--text-primary)]/10 text-[var(--text-secondary)] rounded-xl font-black hover:bg-[var(--text-primary)]/20 transition-all uppercase text-[10px] tracking-widest">
                       <Eraser className="w-4 h-4" />
                       <span>Limpar</span>
@@ -1515,115 +1585,11 @@ const MainContent = () => {
 
         {/* MODAL DE SOLICITAÇÃO DE COMPRA - COMPACTO */}
         <AnimatePresence>
-          {isRequestModalOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 print:hidden">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsRequestModalOpen(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" />
-              <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }} className="relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2rem] shadow-2xl max-w-lg w-full p-8">
-                <div className="mb-6 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-600 text-white rounded-xl shadow-sm"><Send className="w-5 h-5" /></div>
-                    <div>
-                      <h2 className="text-lg font-black text-[var(--text-primary)] uppercase tracking-tight leading-none">Solicitação</h2>
-                      <p className="text-[var(--text-secondary)] text-[8px] font-bold uppercase tracking-widest mt-1">Registro de demanda manual</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => excelImportRef.current?.click()}
-                    className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg text-[8px] font-black uppercase hover:bg-emerald-600/20 transition-all"
-                  >
-                    <FileSpreadsheet className="w-3 h-3" />
-                    <span>Importar</span>
-                  </button>
-                  <input type="file" ref={excelImportRef} className="hidden" accept=".xlsx, .xls" onChange={handleExcelImport} />
-                </div>
-
-                <form onSubmit={handleManualSave} className="space-y-4">
-                  <div className="flex items-center gap-2 p-1 bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl">
-                    <button 
-                      type="button"
-                      onClick={() => setManualForm({...manualForm, type: ItemType.COMERCIAL})}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[9px] font-black uppercase transition-all ${manualForm.type === ItemType.COMERCIAL ? 'bg-indigo-600 text-white shadow-md' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                    >
-                      <Package className="w-3.5 h-3.5" /> COMERCIAL
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setManualForm({...manualForm, type: ItemType.FABRICADO})}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[9px] font-black uppercase transition-all ${manualForm.type === ItemType.FABRICADO ? 'bg-emerald-600 text-white shadow-md' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                    >
-                      <Factory className="w-3.5 h-3.5" /> FABRICADO
-                    </button>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Projeto Destino</label>
-                    <input 
-                      type="text" 
-                      required
-                      placeholder="Identificação do Projeto"
-                      value={manualForm.project}
-                      onChange={e => setManualForm({...manualForm, project: e.target.value})}
-                      className="w-full bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-[var(--text-primary)] font-black uppercase outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-[var(--text-secondary)]/30 text-xs"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Código (P/N)</label>
-                      <input 
-                        type="text" 
-                        required
-                        placeholder="EX: PN-001"
-                        value={manualForm.code}
-                        onChange={e => setManualForm({...manualForm, code: e.target.value})}
-                        className="w-full bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-[var(--text-primary)] font-black uppercase outline-none focus:border-emerald-500 transition-all placeholder:text-[var(--text-secondary)]/30 text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Quantidade</label>
-                      <input 
-                        type="number" 
-                        required
-                        min="1"
-                        placeholder="0"
-                        value={manualForm.quantity}
-                        onChange={e => setManualForm({...manualForm, quantity: e.target.value})}
-                        className="w-full bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-[var(--text-primary)] font-black outline-none focus:border-emerald-500 transition-all placeholder:text-[var(--text-secondary)]/30 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Marca / Fornecedor</label>
-                    <input 
-                      type="text" 
-                      placeholder="Identificação do Fornecedor"
-                      value={manualForm.brand}
-                      onChange={e => setManualForm({...manualForm, brand: e.target.value})}
-                      className="w-full bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-[var(--text-primary)] font-black uppercase outline-none focus:border-emerald-500 transition-all placeholder:text-[var(--text-secondary)]/30 text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[8px] font-black text-[var(--text-secondary)] uppercase tracking-widest ml-1">Descrição do Item</label>
-                    <textarea 
-                      required
-                      rows={2}
-                      placeholder="O que deseja comprar?"
-                      value={manualForm.description}
-                      onChange={e => setManualForm({...manualForm, description: e.target.value})}
-                      className="w-full bg-[var(--bg-inner)] border border-[var(--border-color)] rounded-xl py-3 px-4 text-[var(--text-primary)] font-black uppercase outline-none focus:border-emerald-500 transition-all placeholder:text-[var(--text-secondary)]/30 text-xs resize-none"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-2">
-                    <button type="submit" className="flex-1 px-4 py-3.5 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/20">Registrar</button>
-                    <button type="button" onClick={() => setIsRequestModalOpen(false)} className="px-6 py-3.5 bg-[var(--bg-inner)] text-[var(--text-secondary)] rounded-xl font-black uppercase text-[10px] hover:bg-slate-300 transition-all border border-[var(--border-color)]">Sair</button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
+          <ManualRequestModal 
+            isOpen={isRequestModalOpen} 
+            onClose={() => setIsRequestModalOpen(false)} 
+            addManualRequest={addManualRequest}
+          />
         </AnimatePresence>
 
         <AnimatePresence>
@@ -1640,7 +1606,7 @@ const MainContent = () => {
                 initial={{ opacity: 0, scale: 0.9, y: 20 }} 
                 animate={{ opacity: 1, scale: 1, y: 0 }} 
                 exit={{ opacity: 0, scale: 0.9, y: 20 }} 
-                className="relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2rem] shadow-2xl max-sm w-full p-6 overflow-hidden"
+                className="relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2rem] shadow-2xl max-w-sm w-full p-6 overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                   <Trash2 className="w-16 h-16 text-rose-500" />
@@ -1665,6 +1631,53 @@ const MainContent = () => {
                   </button>
                   <button 
                     onClick={() => setDeleteConfirmProject(null)}
+                    className="flex-1 px-4 py-3 bg-[var(--bg-inner)] text-[var(--text-primary)] rounded-xl font-black uppercase text-[10px] hover:bg-[var(--bg-card)] transition-all border border-[var(--border-color)]"
+                  >
+                    Não, Voltar
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {deleteConfirmItem && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 print:hidden">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }} 
+                onClick={() => setDeleteConfirmItem(null)}
+                className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+                animate={{ opacity: 1, scale: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.9, y: 20 }} 
+                className="relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-[2rem] shadow-2xl max-w-sm w-full p-6 overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                  <Trash2 className="w-16 h-16 text-rose-500" />
+                </div>
+                
+                <div className="mb-6">
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-xl w-fit mb-4">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <h2 className="text-lg font-black text-[var(--text-primary)] uppercase tracking-tight mb-2 leading-tight">DESEJA EXCLUIR ITEM?</h2>
+                  <p className="text-[var(--text-secondary)] text-xs leading-relaxed font-medium">
+                    Remover <span className="text-[var(--text-primary)] font-bold">"{deleteConfirmItem.description}"</span>? Esta ação é irreversível.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={handleConfirmDeleteItem}
+                    className="flex-1 px-4 py-3 bg-rose-600 text-white rounded-xl font-black uppercase text-[10px] hover:bg-rose-500 transition-all shadow-lg shadow-rose-900/20"
+                  >
+                    Sim, Excluir
+                  </button>
+                  <button 
+                    onClick={() => setDeleteConfirmItem(null)}
                     className="flex-1 px-4 py-3 bg-[var(--bg-inner)] text-[var(--text-primary)] rounded-xl font-black uppercase text-[10px] hover:bg-[var(--bg-card)] transition-all border border-[var(--border-color)]"
                   >
                     Não, Voltar

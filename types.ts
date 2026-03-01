@@ -17,6 +17,14 @@ export enum ItemType {
 
 export type ItemStatus = 'PENDENTE' | 'COMPRADO' | 'ENTREGUE';
 
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  user: string;
+  action: string;
+  changes?: Record<string, { from: any; to: any }>;
+}
+
 export interface ProcurementItem {
   id: string;
   sheetName: string;
@@ -33,6 +41,7 @@ export interface ProcurementItem {
   expectedArrival?: string;
   invoiceNumber?: string;
   actualArrivalDate?: string;
+  history?: AuditLog[];
 }
 
 export interface ManualRequest {
